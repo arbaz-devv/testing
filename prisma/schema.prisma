@@ -1,0 +1,357 @@
+// Same schema as cryptoi - use POSTGRES_PRISMA_URL or DATABASE_URL
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+}
+
+enum Role {
+  USER
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  ENTERPRISE
+}
+
+enum Category {
+  EXCHANGES
+  WALLETS
+  HARDWARE
+  CASINOS
+  GAMES
+  NFT
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FLAGGED
+}
+
+enum ReactionType {
+  LIKE
+  DISLIKE
+  LOVE
+  HELPFUL
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum NotificationType {
+  NEW_REVIEW
+  NEW_COMMENT
+  NEW_REACTION
+  REVIEW_APPROVED
+  REVIEW_REJECTED
+  NEW_FOLLOWER
+  MENTION
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum VoteType {
+  UP
+  DOWN
+}
+
+model User {
+  id            String           @id @default(cuid())
+  email         String           @unique
+  username      String           @unique
+  passwordHash  String
+  name          String?
+  avatar        String?
+  bio           String?
+  verified      Boolean          @default(false)
+  role          Role             @default(USER)
+  reputation    Int              @default(0)
+  subscription  SubscriptionTier @default(FREE)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  reviews       Review[]
+  comments      Comment[]
+  reactions     Reaction[]
+  posts         Post[]
+  followers     Follow[]         @relation("Follower")
+  following     Follow[]          @relation("Following")
+  sessions      Session[]
+  notifications Notification[]
+  helpfulVotes  HelpfulVote[]
+  companyFollows CompanyFollow[]
+  complaints    Complaint[]
+  complaintVotes ComplaintVote[]
+  commentVotes  CommentVote[]
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logo        String?
+  website     String?
+  category    Category
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  reviews     Review[]
+  products    Product[]
+  followers   CompanyFollow[]
+  complaints  Complaint[]
+  complaintReplies ComplaintReply[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  image       String?
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category    Category
+  createdAt   DateTime @default(now())
+
+  reviews     Review[]
+  complaints  Complaint[]
+}
+
+model Review {
+  id            String       @id @default(cuid())
+  title         String
+  content       String
+  authorId      String
+  author        User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  companyId    String?
+  company       Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productId    String?
+  product       Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  overallScore  Float
+  criteriaScores Json
+
+  media         Media[]
+  verified      Boolean      @default(false)
+  helpfulCount  Int          @default(0)
+  downVoteCount Int          @default(0)
+  reportCount   Int          @default(0)
+  status        ReviewStatus @default(PENDING)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  comments      Comment[]
+  reactions     Reaction[]
+  helpfulVotes  HelpfulVote[]
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  content   String
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  media     Media[]
+  createdAt DateTime @default(now())
+
+  comments  Comment[]
+  reactions Reaction[]
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  content     String
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reviewId    String?
+  review      Review?  @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  postId      String?
+  post        Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  complaintId String?
+  complaint   Complaint? @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[] @relation("CommentReplies")
+  helpfulCount Int     @default(0)
+  downVoteCount Int     @default(0)
+  createdAt   DateTime @default(now())
+
+  reactions Reaction[]
+  votes     CommentVote[]
+}
+
+model Reaction {
+  id          String       @id @default(cuid())
+  type        ReactionType
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewId    String?
+  review      Review?     @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  postId      String?
+  post        Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId   String?
+  comment     Comment?    @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  complaintId String?
+  complaint   Complaint?  @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+
+  @@unique([userId, reviewId, type])
+  @@unique([userId, postId, type])
+  @@unique([userId, commentId, type])
+  @@unique([userId, complaintId, type])
+}
+
+model Media {
+  id       String    @id @default(cuid())
+  url      String
+  type     MediaType
+  reviewId String?
+  review   Review?   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  postId   String?
+  post     Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+}
+
+model CompanyFollow {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, companyId])
+}
+
+model HelpfulVote {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewId String
+  review   Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  voteType VoteType @default(UP)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, reviewId])
+}
+
+model Complaint {
+  id            String       @id @default(cuid())
+  title         String
+  content       String
+  authorId      String
+  author        User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  companyId     String?
+  company       Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  status        ComplaintStatus @default(OPEN)
+  helpfulCount  Int          @default(0)
+  downVoteCount Int          @default(0)
+  reportCount   Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  comments      Comment[]
+  reactions     Reaction[]
+  votes         ComplaintVote[]
+  replies       ComplaintReply[]
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model ComplaintReply {
+  id          String    @id @default(cuid())
+  content     String
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ComplaintVote {
+  id          String   @id @default(cuid())
+  userId      String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  complaintId String
+  complaint    Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  voteType     VoteType @default(UP)
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, complaintId])
+}
+
+model CommentVote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  voteType  VoteType @default(UP)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, commentId])
+}
+
+model Report {
+  id        String       @id @default(cuid())
+  reporterId String
+  reviewId  String?
+  commentId String?
+  complaintId String?
+  reason    String
+  status    ReportStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+}

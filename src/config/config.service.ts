@@ -1,0 +1,48 @@
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { validateEnv, type EnvConfig } from './env.schema';
+
+@Injectable()
+export class ConfigService implements OnModuleInit {
+  private config: EnvConfig | null = null;
+
+  onModuleInit() {
+    this.config = validateEnv();
+  }
+
+  private getOrThrow(): EnvConfig {
+    if (!this.config) {
+      this.config = validateEnv();
+    }
+    return this.config;
+  }
+
+  get nodeEnv(): string {
+    return this.getOrThrow().NODE_ENV;
+  }
+
+  get port(): number {
+    return this.getOrThrow().PORT ?? 8000;
+  }
+
+  /** JWT secret for signing session tokens. In production must be set via env (32+ chars). */
+  get jwtSecret(): string {
+    const env = this.getOrThrow();
+    if (env.NODE_ENV === 'production') {
+      if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+        throw new Error(
+          'JWT_SECRET is required and must be at least 32 characters in production',
+        );
+      }
+      return env.JWT_SECRET;
+    }
+    return env.JWT_SECRET ?? 'dev-secret-not-for-production';
+  }
+
+  get corsOrigin(): string {
+    return this.getOrThrow().CORS_ORIGIN ?? '';
+  }
+
+  get isProduction(): boolean {
+    return this.getOrThrow().NODE_ENV === 'production';
+  }
+}

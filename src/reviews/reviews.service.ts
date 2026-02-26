@@ -1,0 +1,343 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { SocketService } from '../socket/socket.service';
+import { NotFoundError, UnauthorizedError } from '../common/errors';
+import { createReviewSchema, calculateOverallScore } from '../common/utils';
+
+@Injectable()
+export class ReviewsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly socketService: SocketService,
+  ) {}
+
+  async list(
+    page: number,
+    limit: number,
+    category: string | undefined,
+    companyId: string | undefined,
+    status: string,
+    user: { id: string } | null,
+  ) {
+    const where: Record<string, unknown> = {
+      ...(status && { status }),
+      ...(category && { company: { category } }),
+      ...(companyId && { companyId }),
+    };
+
+    const reviews = await this.prisma.review.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        overallScore: true,
+        criteriaScores: true,
+        verified: true,
+        helpfulCount: true,
+        downVoteCount: true,
+        reportCount: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        authorId: true,
+        companyId: true,
+        productId: true,
+        author: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            verified: true,
+            reputation: true,
+          },
+        },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logo: true,
+          },
+        },
+        product: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        _count: {
+          select: {
+            helpfulVotes: true,
+            comments: true,
+            reactions: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    let reviewsWithVotes = reviews;
+    if (user) {
+      const reviewIds = reviews.map((r) => r.id);
+      const userVotes = await this.prisma.helpfulVote.findMany({
+        where: { userId: user.id, reviewId: { in: reviewIds } },
+        select: { reviewId: true, voteType: true },
+      });
+      const voteMap = new Map(userVotes.map((v) => [v.reviewId, v.voteType]));
+      reviewsWithVotes = reviews.map((r) => ({
+        ...r,
+        userVote: voteMap.get(r.id) ?? null,
+      }));
+    } else {
+      reviewsWithVotes = reviews.map((r) => ({ ...r, userVote: null }));
+    }
+
+    const total = await this.prisma.review.count({ where });
+
+    return {
+      reviews: reviewsWithVotes,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async create(body: unknown, authorId: string) {
+    const validated = createReviewSchema.parse(body);
+    const overallScore =
+      validated.overallScore ?? calculateOverallScore(validated.criteriaScores);
+
+    const review = await this.prisma.review.create({
+      data: {
+        title: validated.title,
+        content: validated.content,
+        authorId,
+        companyId: validated.companyId,
+        productId: validated.productId,
+        overallScore,
+        criteriaScores: validated.criteriaScores ?? {},
+        status: 'APPROVED',
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            verified: true,
+            reputation: true,
+          },
+        },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logo: true,
+            category: true,
+          },
+        },
+        product: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        _count: {
+          select: {
+            helpfulVotes: true,
+            comments: true,
+            reactions: true,
+          },
+        },
+      },
+    });
+
+    this.socketService.emitReviewCreated(review);
+    return review;
+  }
+
+  async getById(id: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            verified: true,
+            reputation: true,
+          },
+        },
+        company: true,
+        product: true,
+        comments: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                username: true,
+                avatar: true,
+              },
+            },
+            _count: { select: { reactions: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        _count: {
+          select: {
+            helpfulVotes: true,
+            comments: true,
+            reactions: true,
+          },
+        },
+      },
+    });
+
+    if (!review) {
+      throw new NotFoundError('Review not found');
+    }
+
+    return review;
+  }
+
+  async vote(reviewId: string, voteType: string, userId: string) {
+    if (!voteType || (voteType !== 'UP' && voteType !== 'DOWN')) {
+      throw new BadRequestException('Invalid vote type. Must be UP or DOWN');
+    }
+
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) throw new NotFoundError('Review not found');
+
+    const existingVote = await this.prisma.helpfulVote.findUnique({
+      where: { userId_reviewId: { userId, reviewId } },
+    });
+
+    let helpfulCount: number;
+    let downVoteCount: number;
+
+    if (existingVote) {
+      if (existingVote.voteType === voteType) {
+        await this.prisma.helpfulVote.delete({
+          where: { id: existingVote.id },
+        });
+        const updateData: Record<string, unknown> =
+          voteType === 'UP'
+            ? { helpfulCount: { decrement: 1 } }
+            : { downVoteCount: { decrement: 1 } };
+        const updated = await this.prisma.review.update({
+          where: { id: reviewId },
+          data: updateData,
+          select: { helpfulCount: true, downVoteCount: true },
+        });
+        helpfulCount = updated.helpfulCount;
+        downVoteCount = updated.downVoteCount;
+      } else {
+        await this.prisma.helpfulVote.update({
+          where: { id: existingVote.id },
+          data: { voteType: voteType },
+        });
+        const updateData: Record<string, unknown> =
+          voteType === 'UP'
+            ? {
+                helpfulCount: { increment: 1 },
+                downVoteCount: { decrement: 1 },
+              }
+            : {
+                helpfulCount: { decrement: 1 },
+                downVoteCount: { increment: 1 },
+              };
+        const updated = await this.prisma.review.update({
+          where: { id: reviewId },
+          data: updateData,
+          select: { helpfulCount: true, downVoteCount: true },
+        });
+        helpfulCount = updated.helpfulCount;
+        downVoteCount = updated.downVoteCount;
+      }
+    } else {
+      await this.prisma.helpfulVote.create({
+        data: { userId, reviewId, voteType: voteType },
+      });
+      const updateData: Record<string, unknown> =
+        voteType === 'UP'
+          ? { helpfulCount: { increment: 1 } }
+          : { downVoteCount: { increment: 1 } };
+      const updated = await this.prisma.review.update({
+        where: { id: reviewId },
+        data: updateData,
+        select: { helpfulCount: true, downVoteCount: true },
+      });
+      helpfulCount = updated.helpfulCount;
+      downVoteCount = updated.downVoteCount;
+    }
+
+    const currentVote = await this.prisma.helpfulVote.findUnique({
+      where: { userId_reviewId: { userId, reviewId } },
+    });
+
+    this.socketService.emitReviewVoteUpdated(
+      reviewId,
+      helpfulCount,
+      downVoteCount,
+    );
+
+    return {
+      voteType: currentVote?.voteType ?? null,
+      helpfulCount,
+      downVoteCount,
+    };
+  }
+
+  async helpful(reviewId: string, userId: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) throw new NotFoundError('Review not found');
+
+    const existing = await this.prisma.helpfulVote.findUnique({
+      where: { userId_reviewId: { userId, reviewId } },
+    });
+
+    if (existing) {
+      await this.prisma.helpfulVote.delete({ where: { id: existing.id } });
+      const updated = await this.prisma.review.update({
+        where: { id: reviewId },
+        data: { helpfulCount: { decrement: 1 } },
+        select: { helpfulCount: true, downVoteCount: true },
+      });
+      this.socketService.emitReviewVoteUpdated(
+        reviewId,
+        updated.helpfulCount,
+        updated.downVoteCount,
+      );
+      return { helpful: false };
+    } else {
+      await this.prisma.helpfulVote.create({
+        data: { userId, reviewId },
+      });
+      const updated = await this.prisma.review.update({
+        where: { id: reviewId },
+        data: { helpfulCount: { increment: 1 } },
+        select: { helpfulCount: true, downVoteCount: true },
+      });
+      this.socketService.emitReviewVoteUpdated(
+        reviewId,
+        updated.helpfulCount,
+        updated.downVoteCount,
+      );
+      return { helpful: true };
+    }
+  }
+}
