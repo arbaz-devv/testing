@@ -24,10 +24,13 @@ export class AuthController {
     const isLocalDevOrigin =
       corsOrigin.includes('http://localhost') ||
       corsOrigin.includes('http://127.0.0.1');
+    const isProduction = process.env.NODE_ENV === 'production';
+    // Cross-origin (e.g. Vercel → Railway): browser only sends cookie if SameSite=None; Secure
+    const sameSite = isProduction && !isLocalDevOrigin ? 'none' : 'lax';
     return {
       httpOnly: true,
-      sameSite: 'lax' as const,
-      secure: process.env.NODE_ENV === 'production' && !isLocalDevOrigin,
+      sameSite: sameSite as 'lax' | 'none',
+      secure: isProduction && !isLocalDevOrigin ? true : isProduction,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     };
@@ -184,7 +187,13 @@ export class AuthController {
     if (token) {
       await this.authService.deleteSession(token);
     }
-    res.clearCookie('session', { path: '/' });
+    const opts = this.sessionCookieOptions();
+    res.clearCookie('session', {
+      path: '/',
+      httpOnly: opts.httpOnly,
+      sameSite: opts.sameSite,
+      secure: opts.secure,
+    });
     return { message: 'Logout successful' };
   }
 }
