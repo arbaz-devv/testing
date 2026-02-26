@@ -91,6 +91,14 @@ export class AuthService {
   }
 
   getSessionTokenFromRequest(request: Request): string | undefined {
+    const authHeader = request.headers.authorization;
+    if (typeof authHeader === 'string') {
+      const [scheme, value] = authHeader.split(' ');
+      if (scheme?.toLowerCase() === 'bearer' && value) {
+        return value.trim();
+      }
+    }
+
     const tokenFromCookieParser =
       typeof request.cookies?.session === 'string'
         ? request.cookies.session

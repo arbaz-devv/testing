@@ -112,6 +112,7 @@ export class AuthController {
 
     return {
       user,
+      token,
       message: 'Registration successful',
     };
   }
@@ -177,6 +178,7 @@ export class AuthController {
         verified: user.verified,
         reputation: user.reputation,
       },
+      token,
       message: 'Login successful',
     };
   }
