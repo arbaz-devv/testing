@@ -1,11 +1,11 @@
-// Same schema as cryptoi - use POSTGRES_PRISMA_URL or DATABASE_URL
+// Same schema as cryptoi - use DATABASE_URL (local Postgres or Prisma Data Platform)
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("POSTGRES_PRISMA_URL")
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
