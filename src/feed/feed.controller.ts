@@ -1,8 +1,6 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { FeedService } from './feed.service';
 import { OptionalAuthGuard } from '../auth/optional-auth.guard';
-import { SessionUser } from '../auth/auth.service';
 
 const FEED_LIMIT_MAX = 50;
 
@@ -13,7 +11,6 @@ export class FeedController {
 
   @Get()
   getFeed(
-    @Req() req: Request & { user?: SessionUser | null },
     @Query('page') page = '1',
     @Query('limit') limit = '20',
     @Query('category') category?: string,
@@ -23,11 +20,6 @@ export class FeedController {
     const safePage = Math.max(1, parsedPage);
     const safeLimit = Math.min(FEED_LIMIT_MAX, Math.max(1, parsedLimit));
 
-    return this.feedService.getFeed(
-      safePage,
-      safeLimit,
-      category,
-      req.user ?? null,
-    );
+    return this.feedService.getFeed(safePage, safeLimit, category);
   }
 }

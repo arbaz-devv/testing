@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { Server as HttpServer } from 'http';
 import helmet from 'helmet';
 import { NestFactory } from '@nestjs/core';
 import { Request, Response, NextFunction } from 'express';
@@ -83,7 +84,7 @@ async function bootstrap() {
   await app.listen(config.port);
 
   // Attach Socket.IO to the same HTTP server (for real-time review updates)
-  const httpServer = app.getHttpServer();
+  const httpServer = app.getHttpServer() as HttpServer;
   const io = new Server(httpServer, {
     path: '/socket.io',
     cors: {
@@ -97,9 +98,12 @@ async function bootstrap() {
   });
 
   io.on('connection', (socket) => {
-    socket.join('reviews');
+    void socket.join('reviews');
   });
 
   globalThis.__socketIO = io;
 }
-bootstrap();
+bootstrap().catch((error: unknown) => {
+  console.error('Failed to bootstrap application', error);
+  process.exit(1);
+});

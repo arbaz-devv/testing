@@ -75,11 +75,7 @@ export class ComplaintsController {
 
   @Post(':id/reply')
   @UseGuards(AuthGuard)
-  reply(
-    @Param('id') id: string,
-    @Body() body: { content: string },
-    @Req() _req: Request & { user: SessionUser },
-  ) {
+  reply(@Param('id') id: string, @Body() body: { content: string }) {
     return this.complaintsService.reply(id, body.content);
   }
 }

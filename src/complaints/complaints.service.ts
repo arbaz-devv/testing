@@ -240,91 +240,59 @@ export class ComplaintsService {
       throw new BadRequestException('Invalid vote type. Must be UP or DOWN');
     }
 
-    const complaint = await this.prisma.complaint.findUnique({
-      where: { id: complaintId },
-    });
-    if (!complaint) throw new NotFoundError('Complaint not found');
+    return this.prisma.$transaction(async (tx) => {
+      const complaint = await tx.complaint.findUnique({
+        where: { id: complaintId },
+        select: { id: true },
+      });
+      if (!complaint) throw new NotFoundError('Complaint not found');
 
-    const existingVote = await this.prisma.complaintVote.findUnique({
-      where: {
-        userId_complaintId: { userId, complaintId },
-      },
-    });
-
-    let helpfulCount: number;
-    let downVoteCount: number;
-
-    if (existingVote) {
-      if (existingVote.voteType === voteType) {
-        await this.prisma.complaintVote.delete({
-          where: { id: existingVote.id },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? { helpfulCount: { decrement: 1 } }
-            : { downVoteCount: { decrement: 1 } };
-        const updated = await this.prisma.complaint.update({
-          where: { id: complaintId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      } else {
-        await this.prisma.complaintVote.update({
-          where: { id: existingVote.id },
-          data: { voteType: voteType },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? {
-                helpfulCount: { increment: 1 },
-                downVoteCount: { decrement: 1 },
-              }
-            : {
-                helpfulCount: { decrement: 1 },
-                downVoteCount: { increment: 1 },
-              };
-        const updated = await this.prisma.complaint.update({
-          where: { id: complaintId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      }
-    } else {
-      await this.prisma.complaintVote.create({
-        data: {
-          userId,
-          complaintId,
-          voteType: voteType,
+      const existingVote = await tx.complaintVote.findUnique({
+        where: {
+          userId_complaintId: { userId, complaintId },
         },
       });
-      const updateData: Record<string, unknown> =
-        voteType === 'UP'
-          ? { helpfulCount: { increment: 1 } }
-          : { downVoteCount: { increment: 1 } };
-      const updated = await this.prisma.complaint.update({
+
+      let nextVoteType: 'UP' | 'DOWN' | null = voteType;
+
+      if (existingVote) {
+        if (existingVote.voteType === voteType) {
+          await tx.complaintVote.delete({
+            where: { id: existingVote.id },
+          });
+          nextVoteType = null;
+        } else {
+          await tx.complaintVote.update({
+            where: { id: existingVote.id },
+            data: { voteType },
+          });
+        }
+      } else {
+        await tx.complaintVote.create({
+          data: {
+            userId,
+            complaintId,
+            voteType,
+          },
+        });
+      }
+
+      const [helpfulCount, downVoteCount] = await Promise.all([
+        tx.complaintVote.count({ where: { complaintId, voteType: 'UP' } }),
+        tx.complaintVote.count({ where: { complaintId, voteType: 'DOWN' } }),
+      ]);
+
+      await tx.complaint.update({
         where: { id: complaintId },
-        data: updateData,
-        select: { helpfulCount: true, downVoteCount: true },
+        data: { helpfulCount, downVoteCount },
       });
-      helpfulCount = updated.helpfulCount;
-      downVoteCount = updated.downVoteCount;
-    }
 
-    const currentVote = await this.prisma.complaintVote.findUnique({
-      where: {
-        userId_complaintId: { userId, complaintId },
-      },
+      return {
+        voteType: nextVoteType,
+        helpfulCount,
+        downVoteCount,
+      };
     });
-
-    return {
-      voteType: currentVote?.voteType ?? null,
-      helpfulCount,
-      downVoteCount,
-    };
   }
 
   async reply(complaintId: string, content: string) {

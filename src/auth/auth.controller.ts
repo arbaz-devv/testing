@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import type { CookieOptions } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { ZodError } from 'zod';
 import { AuthService } from './auth.service';
@@ -19,17 +20,18 @@ import { loginSchema, registerSchema } from '../common/utils';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  private sessionCookieOptions() {
+  private sessionCookieOptions(): CookieOptions {
     const corsOrigin = process.env.CORS_ORIGIN ?? '';
     const isLocalDevOrigin =
       corsOrigin.includes('http://localhost') ||
       corsOrigin.includes('http://127.0.0.1');
     const isProduction = process.env.NODE_ENV === 'production';
     // Cross-origin (e.g. Vercel → Railway): browser only sends cookie if SameSite=None; Secure
-    const sameSite = isProduction && !isLocalDevOrigin ? 'none' : 'lax';
+    const sameSite: 'lax' | 'none' =
+      isProduction && !isLocalDevOrigin ? 'none' : 'lax';
     return {
       httpOnly: true,
-      sameSite: sameSite as 'lax' | 'none',
+      sameSite,
       secure: isProduction && !isLocalDevOrigin ? true : isProduction,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -112,7 +114,6 @@ export class AuthController {
 
     return {
       user,
-      token,
       message: 'Registration successful',
     };
   }
@@ -178,7 +179,6 @@ export class AuthController {
         verified: user.verified,
         reputation: user.reputation,
       },
-      token,
       message: 'Login successful',
     };
   }

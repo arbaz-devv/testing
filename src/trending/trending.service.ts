@@ -39,7 +39,11 @@ export class TrendingService {
         helpfulCount: true,
         createdAt: true,
       },
-      orderBy: [{ overallScore: 'desc' }, { helpfulCount: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        { overallScore: 'desc' },
+        { helpfulCount: 'desc' },
+        { createdAt: 'desc' },
+      ],
       take: limit,
     });
 

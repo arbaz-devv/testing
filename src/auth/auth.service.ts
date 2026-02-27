@@ -82,7 +82,13 @@ export class AuthService {
         const eqIndex = trimmed.indexOf('=');
         if (eqIndex === -1) return acc;
         const key = trimmed.slice(0, eqIndex).trim();
-        const value = decodeURIComponent(trimmed.slice(eqIndex + 1));
+        const rawValue = trimmed.slice(eqIndex + 1);
+        let value = rawValue;
+        try {
+          value = decodeURIComponent(rawValue);
+        } catch {
+          value = rawValue;
+        }
         if (key) acc[key] = value;
         return acc;
       },
@@ -99,9 +105,10 @@ export class AuthService {
       }
     }
 
+    const cookieRecord = request.cookies as Record<string, unknown> | undefined;
     const tokenFromCookieParser =
-      typeof request.cookies?.session === 'string'
-        ? request.cookies.session
+      typeof cookieRecord?.session === 'string'
+        ? cookieRecord.session
         : undefined;
     if (tokenFromCookieParser) return tokenFromCookieParser;
     const cookies = this.parseCookieHeader(request.headers.cookie);
@@ -127,9 +134,7 @@ export class AuthService {
   ): Promise<SessionUser | null> {
     if (!token) return null;
     try {
-      const decoded = jwt.verify(token, this.config.jwtSecret) as {
-        userId: string;
-      };
+      jwt.verify(token, this.config.jwtSecret);
       const session = await this.prisma.session.findUnique({
         where: { token },
         include: { user: true },

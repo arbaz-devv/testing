@@ -25,7 +25,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const message =
         typeof body === 'object' && body !== null && 'message' in body
           ? (body as { message: string | string[] }).message
-          : String(body);
+          : exception.message;
       result = {
         statusCode: status,
         message: Array.isArray(message) ? message[0] : message,

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SocketService } from '../socket/socket.service';
-import { NotFoundError, UnauthorizedError } from '../common/errors';
+import { NotFoundError } from '../common/errors';
 import { createReviewSchema, calculateOverallScore } from '../common/utils';
 
 @Injectable()
@@ -215,89 +215,61 @@ export class ReviewsService {
       throw new BadRequestException('Invalid vote type. Must be UP or DOWN');
     }
 
-    const review = await this.prisma.review.findUnique({
-      where: { id: reviewId },
-    });
-    if (!review) throw new NotFoundError('Review not found');
-
-    const existingVote = await this.prisma.helpfulVote.findUnique({
-      where: { userId_reviewId: { userId, reviewId } },
-    });
-
-    let helpfulCount: number;
-    let downVoteCount: number;
-
-    if (existingVote) {
-      if (existingVote.voteType === voteType) {
-        await this.prisma.helpfulVote.delete({
-          where: { id: existingVote.id },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? { helpfulCount: { decrement: 1 } }
-            : { downVoteCount: { decrement: 1 } };
-        const updated = await this.prisma.review.update({
-          where: { id: reviewId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      } else {
-        await this.prisma.helpfulVote.update({
-          where: { id: existingVote.id },
-          data: { voteType: voteType },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? {
-                helpfulCount: { increment: 1 },
-                downVoteCount: { decrement: 1 },
-              }
-            : {
-                helpfulCount: { decrement: 1 },
-                downVoteCount: { increment: 1 },
-              };
-        const updated = await this.prisma.review.update({
-          where: { id: reviewId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      }
-    } else {
-      await this.prisma.helpfulVote.create({
-        data: { userId, reviewId, voteType: voteType },
-      });
-      const updateData: Record<string, unknown> =
-        voteType === 'UP'
-          ? { helpfulCount: { increment: 1 } }
-          : { downVoteCount: { increment: 1 } };
-      const updated = await this.prisma.review.update({
+    const result = await this.prisma.$transaction(async (tx) => {
+      const review = await tx.review.findUnique({
         where: { id: reviewId },
-        data: updateData,
-        select: { helpfulCount: true, downVoteCount: true },
+        select: { id: true },
       });
-      helpfulCount = updated.helpfulCount;
-      downVoteCount = updated.downVoteCount;
-    }
+      if (!review) throw new NotFoundError('Review not found');
 
-    const currentVote = await this.prisma.helpfulVote.findUnique({
-      where: { userId_reviewId: { userId, reviewId } },
+      const existingVote = await tx.helpfulVote.findUnique({
+        where: { userId_reviewId: { userId, reviewId } },
+      });
+
+      let nextVoteType: 'UP' | 'DOWN' | null = voteType;
+
+      if (existingVote) {
+        if (existingVote.voteType === voteType) {
+          await tx.helpfulVote.delete({
+            where: { id: existingVote.id },
+          });
+          nextVoteType = null;
+        } else {
+          await tx.helpfulVote.update({
+            where: { id: existingVote.id },
+            data: { voteType },
+          });
+        }
+      } else {
+        await tx.helpfulVote.create({
+          data: { userId, reviewId, voteType },
+        });
+      }
+
+      const [helpfulCount, downVoteCount] = await Promise.all([
+        tx.helpfulVote.count({ where: { reviewId, voteType: 'UP' } }),
+        tx.helpfulVote.count({ where: { reviewId, voteType: 'DOWN' } }),
+      ]);
+
+      await tx.review.update({
+        where: { id: reviewId },
+        data: { helpfulCount, downVoteCount },
+      });
+
+      return {
+        voteType: nextVoteType,
+        helpfulCount,
+        downVoteCount,
+      };
     });
 
     this.socketService.emitReviewVoteUpdated(
       reviewId,
-      helpfulCount,
-      downVoteCount,
+      result.helpfulCount,
+      result.downVoteCount,
     );
 
-    return {
-      voteType: currentVote?.voteType ?? null,
-      helpfulCount,
-      downVoteCount,
-    };
+    return result;
   }
 
   async helpful(reviewId: string, userId: string) {

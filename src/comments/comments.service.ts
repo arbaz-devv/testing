@@ -9,9 +9,19 @@ export class CommentsService {
 
   async create(body: unknown, authorId: string) {
     const validated = createCommentSchema.parse(body);
-    if (!validated.reviewId && !validated.postId && !validated.complaintId) {
+    const targets = [
+      validated.reviewId,
+      validated.postId,
+      validated.complaintId,
+    ].filter((value): value is string => Boolean(value));
+    if (targets.length === 0) {
       throw new BadRequestException(
         'Must provide reviewId, postId, or complaintId',
+      );
+    }
+    if (targets.length > 1) {
+      throw new BadRequestException(
+        'Provide exactly one of reviewId, postId, or complaintId',
       );
     }
 
@@ -258,90 +268,58 @@ export class CommentsService {
       throw new BadRequestException('Invalid vote type. Must be UP or DOWN');
     }
 
-    const comment = await this.prisma.comment.findUnique({
-      where: { id: commentId },
-    });
-    if (!comment) throw new NotFoundError('Comment not found');
+    return this.prisma.$transaction(async (tx) => {
+      const comment = await tx.comment.findUnique({
+        where: { id: commentId },
+        select: { id: true },
+      });
+      if (!comment) throw new NotFoundError('Comment not found');
 
-    const existingVote = await this.prisma.commentVote.findUnique({
-      where: {
-        userId_commentId: { userId, commentId },
-      },
-    });
-
-    let helpfulCount: number;
-    let downVoteCount: number;
-
-    if (existingVote) {
-      if (existingVote.voteType === voteType) {
-        await this.prisma.commentVote.delete({
-          where: { id: existingVote.id },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? { helpfulCount: { decrement: 1 } }
-            : { downVoteCount: { decrement: 1 } };
-        const updated = await this.prisma.comment.update({
-          where: { id: commentId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      } else {
-        await this.prisma.commentVote.update({
-          where: { id: existingVote.id },
-          data: { voteType: voteType },
-        });
-        const updateData: Record<string, unknown> =
-          voteType === 'UP'
-            ? {
-                helpfulCount: { increment: 1 },
-                downVoteCount: { decrement: 1 },
-              }
-            : {
-                helpfulCount: { decrement: 1 },
-                downVoteCount: { increment: 1 },
-              };
-        const updated = await this.prisma.comment.update({
-          where: { id: commentId },
-          data: updateData,
-          select: { helpfulCount: true, downVoteCount: true },
-        });
-        helpfulCount = updated.helpfulCount;
-        downVoteCount = updated.downVoteCount;
-      }
-    } else {
-      await this.prisma.commentVote.create({
-        data: {
-          userId,
-          commentId,
-          voteType: voteType,
+      const existingVote = await tx.commentVote.findUnique({
+        where: {
+          userId_commentId: { userId, commentId },
         },
       });
-      const updateData: Record<string, unknown> =
-        voteType === 'UP'
-          ? { helpfulCount: { increment: 1 } }
-          : { downVoteCount: { increment: 1 } };
-      const updated = await this.prisma.comment.update({
+
+      let nextVoteType: 'UP' | 'DOWN' | null = voteType;
+
+      if (existingVote) {
+        if (existingVote.voteType === voteType) {
+          await tx.commentVote.delete({
+            where: { id: existingVote.id },
+          });
+          nextVoteType = null;
+        } else {
+          await tx.commentVote.update({
+            where: { id: existingVote.id },
+            data: { voteType },
+          });
+        }
+      } else {
+        await tx.commentVote.create({
+          data: {
+            userId,
+            commentId,
+            voteType,
+          },
+        });
+      }
+
+      const [helpfulCount, downVoteCount] = await Promise.all([
+        tx.commentVote.count({ where: { commentId, voteType: 'UP' } }),
+        tx.commentVote.count({ where: { commentId, voteType: 'DOWN' } }),
+      ]);
+
+      await tx.comment.update({
         where: { id: commentId },
-        data: updateData,
-        select: { helpfulCount: true, downVoteCount: true },
+        data: { helpfulCount, downVoteCount },
       });
-      helpfulCount = updated.helpfulCount;
-      downVoteCount = updated.downVoteCount;
-    }
 
-    const currentVote = await this.prisma.commentVote.findUnique({
-      where: {
-        userId_commentId: { userId, commentId },
-      },
+      return {
+        voteType: nextVoteType,
+        helpfulCount,
+        downVoteCount,
+      };
     });
-
-    return {
-      voteType: currentVote?.voteType ?? null,
-      helpfulCount,
-      downVoteCount,
-    };
   }
 }
