@@ -14,6 +14,7 @@ import { SearchModule } from './search/search.module';
 import { TrendingModule } from './trending/trending.module';
 import { CompaniesModule } from './companies/companies.module';
 import { SocketModule } from './socket/socket.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SocketModule } from './socket/socket.module';
     SearchModule,
     TrendingModule,
     CompaniesModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
