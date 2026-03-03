@@ -110,6 +110,30 @@ export class AnalyticsService implements OnModuleDestroy {
     await this.redis.expire(key, TTL_DAYS * 24 * 60 * 60);
   }
 
+  private emptyStats(from: string, to: string): AnalyticsStats {
+    return {
+      totalPageviews: 0,
+      totalUniques: 0,
+      activeToday: 0,
+      byCountry: {},
+      byDevice: {},
+      byBrowser: {},
+      byOs: {},
+      byReferrer: {},
+      byUtmSource: {},
+      byUtmMedium: {},
+      byUtmCampaign: {},
+      byHour: {},
+      byWeekday: {},
+      topPages: [],
+      avgDurationSeconds: 0,
+      totalBounces: 0,
+      bounceRate: 0,
+      timeSeries: [],
+      dateRange: { from, to },
+    };
+  }
+
   /**
    * Resolve country code for an IP:
    * 1) Try local geoip-lite database
@@ -165,8 +189,6 @@ export class AnalyticsService implements OnModuleDestroy {
     if (this.isValidCountryCode(hint)) return hint;
 
     const normalizedIp = this.normalizeIp(ip);
-
-console.log("normalizedIp", normalizedIp);    
     if (!normalizedIp || this.isPrivateOrLocalIp(normalizedIp)) return 'unknown';
 
     const cacheKey = `${KEY_PREFIX}:ip_country:${normalizedIp}`;
@@ -187,8 +209,6 @@ console.log("normalizedIp", normalizedIp);
     if (!countryCode || countryCode === 'UNKNOWN') {
       try {
         const res = await fetch(`https://ipwho.is/${encodeURIComponent(normalizedIp)}?fields=success,country_code`);
-        console.log(res,'res');
-        
         if (res.ok) {
           const json = (await res.json()) as { success?: boolean; country_code?: string };
           if (json.success === true && json.country_code) {
@@ -248,8 +268,6 @@ console.log("normalizedIp", normalizedIp);
 
   /** Non-blocking: enqueue track and return immediately. */
   async track(ip: string, userAgent: string, body: TrackPayload, countryHint?: string): Promise<void> {
-
-console.log("ip", ip);    
     if (!this.enabled || !this.redis) return;
 
     const now = new Date();
@@ -306,7 +324,7 @@ console.log("ip", ip);
   }
 
   async getStats(from: string, to: string): Promise<AnalyticsStats | null> {
-    if (!this.redis) return null;
+    if (!this.redis) return this.emptyStats(from, to);
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
@@ -336,48 +354,52 @@ console.log("ip", ip);
 
     const WEEKDAY_NAMES: Record<string, string> = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
 
-    for (const day of days) {
-      const [pv, uniques, countries, devices, browsers, oss, referrers, utmSources, utmMediums, utmCampaigns, hours, weekdays, paths, durList, bounces] = await Promise.all([
-        this.redis.get(`${KEY_PREFIX}:pageviews:${day}`),
-        this.redis.smembers(`${KEY_PREFIX}:uniques:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:country:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:device:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:browser:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:os:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:referrer:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:utm_source:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:utm_medium:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:utm_campaign:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:hour:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:weekday:${day}`),
-        this.redis.hgetall(`${KEY_PREFIX}:path:${day}`),
-        this.redis.lrange(`${KEY_PREFIX}:durations:${day}`, 0, -1),
-        this.redis.get(`${KEY_PREFIX}:bounces:${day}`),
-      ]);
+    try {
+      for (const day of days) {
+        const [pv, uniques, countries, devices, browsers, oss, referrers, utmSources, utmMediums, utmCampaigns, hours, weekdays, paths, durList, bounces] = await Promise.all([
+          this.redis.get(`${KEY_PREFIX}:pageviews:${day}`),
+          this.redis.smembers(`${KEY_PREFIX}:uniques:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:country:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:device:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:browser:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:os:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:referrer:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:utm_source:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:utm_medium:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:utm_campaign:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:hour:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:weekday:${day}`),
+          this.redis.hgetall(`${KEY_PREFIX}:path:${day}`),
+          this.redis.lrange(`${KEY_PREFIX}:durations:${day}`, 0, -1),
+          this.redis.get(`${KEY_PREFIX}:bounces:${day}`),
+        ]);
 
-      const pvNum = parseInt(pv || '0', 10);
-      const uniquesList = uniques || [];
-      totalPageviews += pvNum;
-      totalBounces += parseInt(bounces || '0', 10);
-      uniquesList.forEach((u) => uniquesSet.add(u));
+        const pvNum = parseInt(pv || '0', 10);
+        const uniquesList = uniques || [];
+        totalPageviews += pvNum;
+        totalBounces += parseInt(bounces || '0', 10);
+        uniquesList.forEach((u) => uniquesSet.add(u));
 
-      timeSeries.push({ date: day, pageviews: pvNum, uniques: uniquesList.length });
+        timeSeries.push({ date: day, pageviews: pvNum, uniques: uniquesList.length });
 
-      const merge = (acc: Record<string, number>, src?: Record<string, string> | null) => {
-        Object.entries(src || {}).forEach(([k, v]) => { acc[k] = (acc[k] || 0) + parseInt(v, 10); });
-      };
-      merge(byCountry, countries);
-      merge(byDevice, devices);
-      merge(byBrowser, browsers);
-      merge(byOs, oss);
-      merge(byReferrer, referrers);
-      merge(byUtmSource, utmSources);
-      merge(byUtmMedium, utmMediums);
-      merge(byUtmCampaign, utmCampaigns);
-      merge(byHour, hours);
-      merge(byWeekday, weekdays);
-      Object.entries(paths || {}).forEach(([k, v]) => { pathCounts[k] = (pathCounts[k] || 0) + parseInt(v, 10); });
-      (durList || []).forEach((s) => { const n = parseInt(s, 10); if (!Number.isNaN(n)) durations.push(n); });
+        const merge = (acc: Record<string, number>, src?: Record<string, string> | null) => {
+          Object.entries(src || {}).forEach(([k, v]) => { acc[k] = (acc[k] || 0) + parseInt(v, 10); });
+        };
+        merge(byCountry, countries);
+        merge(byDevice, devices);
+        merge(byBrowser, browsers);
+        merge(byOs, oss);
+        merge(byReferrer, referrers);
+        merge(byUtmSource, utmSources);
+        merge(byUtmMedium, utmMediums);
+        merge(byUtmCampaign, utmCampaigns);
+        merge(byHour, hours);
+        merge(byWeekday, weekdays);
+        Object.entries(paths || {}).forEach(([k, v]) => { pathCounts[k] = (pathCounts[k] || 0) + parseInt(v, 10); });
+        (durList || []).forEach((s) => { const n = parseInt(s, 10); if (!Number.isNaN(n)) durations.push(n); });
+      }
+    } catch {
+      return this.emptyStats(days[0] || from, days[days.length - 1] || to);
     }
 
     const topPages = Object.entries(pathCounts)
@@ -394,8 +416,12 @@ console.log("ip", ip);
     const today = this.dayKey(new Date());
     let activeToday = 0;
     if (days.includes(today)) {
-      const u = await this.redis.smembers(`${KEY_PREFIX}:uniques:${today}`);
-      activeToday = u?.length ?? 0;
+      try {
+        const u = await this.redis.smembers(`${KEY_PREFIX}:uniques:${today}`);
+        activeToday = u?.length ?? 0;
+      } catch {
+        activeToday = 0;
+      }
     }
 
     // Map weekday numbers to names for display (0=Sun ... 6=Sat)
