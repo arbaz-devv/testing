@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
 import { isIP } from 'node:net';
 import type { Request } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from './analytics.service';
 import { TrackDto } from './dto/track.dto';
 
@@ -108,7 +109,10 @@ function getCountryHint(req: Request): string | undefined {
 
 @Controller('api/analytics')
 export class AnalyticsController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Post('track')
   track(@Req() req: Request, @Body() body: TrackDto): { ok: boolean } {
@@ -135,6 +139,17 @@ export class AnalyticsController {
     if (data === null) {
       return { ok: false, error: 'Analytics not available (Redis required)' };
     }
+    try {
+      const fromD = new Date(fromDate);
+      fromD.setUTCHours(0, 0, 0, 0);
+      const toD = new Date(toDate);
+      toD.setUTCHours(23, 59, 59, 999);
+      data.newMembersInRange = await this.prisma.user.count({
+        where: { createdAt: { gte: fromD, lte: toD } },
+      });
+    } catch {
+      data.newMembersInRange = 0;
+    }
     return { ok: true, data };
   }
 
@@ -150,5 +165,58 @@ export class AnalyticsController {
       enabled,
       ...this.analyticsService.getHealthDetails(),
     };
+  }
+
+  @Get('realtime')
+  async realtime(
+    @Query('key') key?: string,
+  ): Promise<{ ok: boolean; activeNow?: number; byCountry?: Record<string, number>; error?: string }> {
+    const apiKey = process.env.ANALYTICS_API_KEY;
+    if (apiKey && apiKey.length > 0 && key !== apiKey) {
+      return { ok: false, error: 'Unauthorized' };
+    }
+    const data = await this.analyticsService.getRealtime();
+    return { ok: true, activeNow: data.activeNow, byCountry: data.byCountry };
+  }
+
+  /** Latest registered users (real data from DB) for admin analytics dashboard */
+  @Get('latest-members')
+  async latestMembers(
+    @Query('limit') limit = '8',
+    @Query('key') key?: string,
+  ): Promise<{ ok: boolean; members?: { id: string; name: string; date: string }[]; error?: string }> {
+    const apiKey = process.env.ANALYTICS_API_KEY;
+    if (apiKey && apiKey.length > 0 && key !== apiKey) {
+      return { ok: false, error: 'Unauthorized' };
+    }
+    const take = Math.min(20, Math.max(1, parseInt(limit, 10) || 8));
+    try {
+      const users = await this.prisma.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+        select: { id: true, name: true, username: true, createdAt: true },
+      });
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().slice(0, 10);
+      const members = users.map((u) => {
+        const d = u.createdAt.toISOString().slice(0, 10);
+        let date: string;
+        if (d === today) date = 'Today';
+        else if (d === yesterdayStr) date = 'Yesterday';
+        else date = u.createdAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        return {
+          id: u.id,
+          name: u.name || u.username || 'User',
+          date,
+        };
+      });
+      return { ok: true, members };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to fetch latest members';
+      return { ok: false, error: message };
+    }
   }
 }
