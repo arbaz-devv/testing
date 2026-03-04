@@ -295,6 +295,111 @@ export class AdminController {
     };
   }
 
+  @Get('reviews/:id')
+  async getReview(
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    requireAdmin(req);
+    const review = await this.prisma.review.findUnique({
+      where: { id },
+      include: {
+        author: { select: { id: true, username: true, name: true } },
+        product: { select: { id: true, name: true, slug: true } },
+        company: { select: { id: true, name: true, slug: true } },
+        _count: { select: { comments: true } },
+        reactions: { select: { type: true } },
+        helpfulVotes: { select: { userId: true, voteType: true, createdAt: true } },
+        comments: {
+          where: { parentId: null },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            author: { select: { id: true, username: true, name: true } },
+            replies: {
+              orderBy: { createdAt: 'asc' },
+              include: {
+                author: { select: { id: true, username: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!review) throw new NotFoundException('Review not found');
+
+    const reactionCounts = (review.reactions as { type: string }[]).reduce(
+      (acc, r) => {
+        acc[r.type] = (acc[r.type] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const mapComment = (c: {
+      id: string;
+      content: string;
+      authorId: string;
+      author: { id: string; name: string | null; username: string | null };
+      helpfulCount: number;
+      downVoteCount: number;
+      createdAt: Date;
+      replies?: Array<{
+        id: string;
+        content: string;
+        authorId: string;
+        author: { id: string; name: string | null; username: string | null };
+        helpfulCount: number;
+        downVoteCount: number;
+        createdAt: Date;
+      }>;
+    }) => ({
+      id: c.id,
+      content: c.content,
+      authorId: c.authorId,
+      author: c.author?.name ?? c.author?.username ?? 'Unknown',
+      helpfulCount: c.helpfulCount,
+      downVoteCount: c.downVoteCount,
+      createdAt: c.createdAt.toISOString(),
+      replyCount: c.replies?.length ?? 0,
+      replies: (c.replies ?? []).map((r) => ({
+        id: r.id,
+        content: r.content,
+        authorId: r.authorId,
+        author: r.author?.name ?? r.author?.username ?? 'Unknown',
+        helpfulCount: r.helpfulCount,
+        downVoteCount: r.downVoteCount,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+
+    return {
+      id: review.id,
+      title: review.title,
+      excerpt: review.content.slice(0, 120) + (review.content.length > 120 ? '...' : ''),
+      body: review.content,
+      author: review.author?.name ?? review.author?.username ?? 'Unknown',
+      authorId: review.authorId,
+      productName: review.product?.name ?? review.company?.name ?? '-',
+      productId: review.productId,
+      companyId: review.companyId,
+      score: review.overallScore,
+      helpfulCount: review.helpfulCount,
+      downVoteCount: review.downVoteCount,
+      reportCount: review.reportCount,
+      status: review.status,
+      createdAt: review.createdAt.toISOString(),
+      updatedAt: review.updatedAt.toISOString(),
+      commentCount: review._count.comments,
+      reactions: reactionCounts,
+      helpfulVotes: review.helpfulVotes.map((v) => ({
+        userId: v.userId,
+        voteType: v.voteType,
+        createdAt: v.createdAt.toISOString(),
+      })),
+      comments: review.comments.map(mapComment),
+    };
+  }
+
   @Patch('reviews/:id')
   async updateReviewStatus(
     @Param('id') id: string,
