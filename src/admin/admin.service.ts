@@ -7,6 +7,26 @@ import type { Prisma } from '@prisma/client';
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizePagination(page: number, limit: number) {
+    const normalizedPage = Math.max(1, page);
+    const normalizedLimit = Math.min(100, Math.max(1, limit));
+    return { page: normalizedPage, limit: normalizedLimit };
+  }
+
+  private buildCreatedAtRange(dateFrom?: string, dateTo?: string) {
+    if (!dateFrom && !dateTo) return undefined;
+
+    const range: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) range.gte = new Date(dateFrom);
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setUTCHours(23, 59, 59, 999);
+      range.lte = to;
+    }
+
+    return range;
+  }
+
   private startOfToday(): Date {
     const d = new Date();
     d.setUTCHours(0, 0, 0, 0);
@@ -60,18 +80,10 @@ export class AdminService {
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const p = Math.max(1, params.page);
-    const l = Math.min(100, Math.max(1, params.limit));
+    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
     const where: { createdAt?: { gte?: Date; lte?: Date }; OR?: Array<{ email?: { contains: string; mode: 'insensitive' }; name?: { contains: string; mode: 'insensitive' }; username?: { contains: string; mode: 'insensitive' } }> } = {};
-    if (params.dateFrom || params.dateTo) {
-      where.createdAt = {};
-      if (params.dateFrom) where.createdAt.gte = new Date(params.dateFrom);
-      if (params.dateTo) {
-        const to = new Date(params.dateTo);
-        to.setUTCHours(23, 59, 59, 999);
-        where.createdAt.lte = to;
-      }
-    }
+    const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
+    if (createdAtRange) where.createdAt = createdAtRange;
     if (params.q?.trim()) {
       const q = params.q.trim();
       where.OR = [
@@ -116,12 +128,37 @@ export class AdminService {
     };
   }
 
-  async getUserDetail(id: string) {
+  async getUserDetail(id: string, lazy = false) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: { _count: { select: { reviews: true } } },
     });
     if (!user) throw new NotFoundException('User not found');
+
+    if (lazy) {
+      return {
+        lazy: true,
+        deferred: ['metrics', 'activitySeries', 'reviews', 'complaints', 'discussions'],
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          name: user.name ?? user.username,
+          role: user.role.toLowerCase(),
+          status: 'active',
+          joinedAt: user.createdAt.toISOString().slice(0, 10),
+          reviewCount: user._count.reviews,
+          lastActive: user.updatedAt.toISOString().slice(0, 10),
+          lastLoginAt: undefined,
+        },
+        metrics: null,
+        activitySeries: [],
+        reviews: [],
+        complaints: [],
+        discussions: [],
+        feedbacks: [],
+      };
+    }
 
     const [
       commentsCount,
@@ -265,28 +302,16 @@ export class AdminService {
   async getReviews(params: {
     page: number;
     limit: number;
-    status?: string;
+    status?: ReviewStatus;
     q?: string;
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const p = Math.max(1, params.page);
-    const l = Math.min(100, Math.max(1, params.limit));
-    const statusFilter =
-      params.status && ['PENDING', 'APPROVED', 'REJECTED', 'FLAGGED'].includes(params.status.toUpperCase())
-        ? (params.status.toUpperCase() as ReviewStatus)
-        : undefined;
+    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
     const where: Prisma.ReviewWhereInput = {};
-    if (statusFilter) where.status = statusFilter;
-    if (params.dateFrom || params.dateTo) {
-      where.createdAt = {};
-      if (params.dateFrom) where.createdAt.gte = new Date(params.dateFrom);
-      if (params.dateTo) {
-        const to = new Date(params.dateTo);
-        to.setUTCHours(23, 59, 59, 999);
-        where.createdAt.lte = to;
-      }
-    }
+    if (params.status) where.status = params.status;
+    const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
+    if (createdAtRange) where.createdAt = createdAtRange;
     if (params.q?.trim()) {
       const q = params.q.trim();
       where.OR = [
@@ -335,7 +360,45 @@ export class AdminService {
     };
   }
 
-  async getReview(id: string) {
+  async getReview(id: string, lazy = false) {
+    if (lazy) {
+      const review = await this.prisma.review.findUnique({
+        where: { id },
+        include: {
+          author: { select: { id: true, username: true, name: true } },
+          product: { select: { id: true, name: true, slug: true } },
+          company: { select: { id: true, name: true, slug: true } },
+          _count: { select: { comments: true } },
+        },
+      });
+      if (!review) throw new NotFoundException('Review not found');
+
+      return {
+        lazy: true,
+        deferred: ['comments', 'helpfulVotes', 'reactions'],
+        id: review.id,
+        title: review.title,
+        excerpt: review.content.slice(0, 120) + (review.content.length > 120 ? '...' : ''),
+        body: review.content,
+        author: review.author?.name ?? review.author?.username ?? 'Unknown',
+        authorId: review.authorId,
+        productName: review.product?.name ?? review.company?.name ?? '-',
+        productId: review.productId,
+        companyId: review.companyId,
+        score: review.overallScore,
+        helpfulCount: review.helpfulCount,
+        downVoteCount: review.downVoteCount,
+        reportCount: review.reportCount,
+        status: review.status,
+        createdAt: review.createdAt.toISOString(),
+        updatedAt: review.updatedAt.toISOString(),
+        commentCount: review._count.comments,
+        reactions: {},
+        helpfulVotes: [],
+        comments: [],
+      };
+    }
+
     const review = await this.prisma.review.findUnique({
       where: { id },
       include: {
@@ -446,8 +509,7 @@ export class AdminService {
   }
 
   async getRatings(params: { page: number; limit: number }) {
-    const p = Math.max(1, params.page);
-    const l = Math.min(100, Math.max(1, params.limit));
+    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
     const products = await this.prisma.product.findMany({
       skip: (p - 1) * l,
       take: l,

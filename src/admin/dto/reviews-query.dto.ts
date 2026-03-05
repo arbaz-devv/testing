@@ -1,30 +1,39 @@
-import { IsOptional, IsString, IsDateString, MaxLength } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsOptional,
+  IsString,
+  IsDateString,
+  IsEnum,
+  MaxLength,
+} from 'class-validator';
+import { ReviewStatus } from '@prisma/client';
+import { Transform } from 'class-transformer';
+import { PageLimitDto } from './page-limit.dto';
+import { IsDateRangeValid } from './date-range.validator';
 
-export class ReviewsQueryDto {
+export class ReviewsQueryDto extends PageLimitDto {
   @IsOptional()
-  @Type(() => Number)
-  page?: number = 1;
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase().trim() : value,
+  )
+  @IsEnum(ReviewStatus, {
+    message:
+      'status must be one of: PENDING, APPROVED, REJECTED, FLAGGED',
+  })
+  status?: ReviewStatus;
 
   @IsOptional()
-  @Type(() => Number)
-  limit?: number = 20;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  status?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
+  @IsString({ message: 'q must be a string' })
+  @MaxLength(200, { message: 'q must not exceed 200 characters' })
   q?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({}, { message: 'dateFrom must be a valid ISO 8601 date string' })
   dateFrom?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({}, { message: 'dateTo must be a valid ISO 8601 date string' })
+  @IsDateRangeValid('dateFrom', {
+    message: 'dateTo must be greater than or equal to dateFrom',
+  })
   dateTo?: string;
 }

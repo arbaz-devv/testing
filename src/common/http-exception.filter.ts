@@ -22,13 +22,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();
-      const message =
+      const messageValue =
         typeof body === 'object' && body !== null && 'message' in body
           ? (body as { message: string | string[] }).message
           : exception.message;
+      const errors =
+        typeof body === 'object' && body !== null && 'errors' in body
+          ? (body as { errors: unknown }).errors
+          : undefined;
       result = {
         statusCode: status,
-        message: Array.isArray(message) ? message[0] : message,
+        message: Array.isArray(messageValue) ? messageValue[0] : messageValue,
+        errors,
       };
     } else {
       result = handleError(exception);

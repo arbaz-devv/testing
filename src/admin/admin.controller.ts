@@ -10,13 +10,13 @@ import {
 import { AdminGuard } from './admin.guard';
 import { AdminService } from './admin.service';
 import {
+  AdminLazyQueryDto,
   PageLimitDto,
   ReviewStatusQueryDto,
   UpdateReviewStatusDto,
   ReviewsQueryDto,
   UsersQueryDto,
 } from './dto';
-import { ReviewStatus } from '@prisma/client';
 
 @Controller('api/admin')
 @UseGuards(AdminGuard)
@@ -42,8 +42,8 @@ export class AdminController {
   }
 
   @Get('users/:id')
-  async userDetail(@Param('id') id: string) {
-    return this.admin.getUserDetail(id);
+  async userDetail(@Param('id') id: string, @Query() query: AdminLazyQueryDto) {
+    return this.admin.getUserDetail(id, query.lazy ?? false);
   }
 
   @Get('reviews')
@@ -61,8 +61,8 @@ export class AdminController {
   }
 
   @Get('reviews/:id')
-  async getReview(@Param('id') id: string) {
-    return this.admin.getReview(id);
+  async getReview(@Param('id') id: string, @Query() query: AdminLazyQueryDto) {
+    return this.admin.getReview(id, query.lazy ?? false);
   }
 
   @Patch('reviews/:id')
@@ -70,8 +70,7 @@ export class AdminController {
     @Param('id') id: string,
     @Body() dto: UpdateReviewStatusDto,
   ) {
-    const status = dto.status.toUpperCase() as ReviewStatus;
-    return this.admin.updateReviewStatus(id, status);
+    return this.admin.updateReviewStatus(id, dto.status);
   }
 
   @Get('ratings')

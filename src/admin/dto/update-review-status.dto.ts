@@ -1,8 +1,13 @@
-import { IsIn } from 'class-validator';
+import { IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { ReviewStatus } from '@prisma/client';
 
 export class UpdateReviewStatusDto {
-  @IsIn(['PENDING', 'APPROVED', 'REJECTED', 'FLAGGED'], {
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase().trim() : value,
+  )
+  @IsEnum(ReviewStatus, {
     message: 'status must be one of: PENDING, APPROVED, REJECTED, FLAGGED',
   })
-  status: string;
+  status: ReviewStatus;
 }

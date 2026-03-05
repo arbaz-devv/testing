@@ -2,7 +2,11 @@ import 'dotenv/config';
 import { Server as HttpServer } from 'http';
 import helmet from 'helmet';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  ValidationError,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { Server } from 'socket.io';
 import { AppModule } from './app.module';
@@ -10,6 +14,33 @@ import { ConfigService } from './config/config.service';
 import { validateEnv } from './config/env.schema';
 import { AllExceptionsFilter } from './common/http-exception.filter';
 import './socket/socket.types';
+
+type ValidationIssue = {
+  field: string;
+  message: string;
+};
+
+function collectValidationIssues(
+  errors: ValidationError[],
+  parentPath = '',
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const error of errors) {
+    const fieldPath = parentPath ? `${parentPath}.${error.property}` : error.property;
+    const messages = error.constraints ? Object.values(error.constraints) : [];
+
+    for (const message of messages) {
+      issues.push({ field: fieldPath, message });
+    }
+
+    if (error.children && error.children.length > 0) {
+      issues.push(...collectValidationIssues(error.children, fieldPath));
+    }
+  }
+
+  return issues;
+}
 
 async function bootstrap() {
   validateEnv();
@@ -22,7 +53,15 @@ async function bootstrap() {
       transform: true,
       transformOptions: { enableImplicitConversion: true },
       whitelist: true,
-      forbidNonWhitelisted: false,
+      forbidNonWhitelisted: true,
+      forbidUnknownValues: true,
+      stopAtFirstError: false,
+      validationError: { target: false, value: false },
+      exceptionFactory: (errors: ValidationError[]) =>
+        new BadRequestException({
+          message: 'Validation failed',
+          errors: collectValidationIssues(errors),
+        }),
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());

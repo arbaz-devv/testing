@@ -69,33 +69,35 @@ enum VoteType {
 }
 
 model User {
-  id            String           @id @default(cuid())
-  email         String           @unique
-  username      String           @unique
-  passwordHash  String
-  name          String?
-  avatar        String?
-  bio           String?
-  verified      Boolean          @default(false)
-  role          Role             @default(USER)
-  reputation    Int              @default(0)
-  subscription  SubscriptionTier @default(FREE)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id           String           @id @default(cuid())
+  email        String           @unique
+  username     String           @unique
+  passwordHash String
+  name         String?
+  avatar       String?
+  bio          String?
+  verified     Boolean          @default(false)
+  role         Role             @default(USER)
+  reputation   Int              @default(0)
+  subscription SubscriptionTier @default(FREE)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
-  reviews       Review[]
-  comments      Comment[]
-  reactions     Reaction[]
-  posts         Post[]
-  followers     Follow[]         @relation("Follower")
-  following     Follow[]          @relation("Following")
-  sessions      Session[]
-  notifications Notification[]
-  helpfulVotes  HelpfulVote[]
+  reviews        Review[]
+  comments       Comment[]
+  reactions      Reaction[]
+  posts          Post[]
+  followers      Follow[]        @relation("Follower")
+  following      Follow[]        @relation("Following")
+  sessions       Session[]
+  notifications  Notification[]
+  helpfulVotes   HelpfulVote[]
   companyFollows CompanyFollow[]
-  complaints    Complaint[]
+  complaints     Complaint[]
   complaintVotes ComplaintVote[]
-  commentVotes  CommentVote[]
+  commentVotes   CommentVote[]
+
+  @@index([createdAt])
 }
 
 model Company {
@@ -110,10 +112,10 @@ model Company {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  reviews     Review[]
-  products    Product[]
-  followers   CompanyFollow[]
-  complaints  Complaint[]
+  reviews          Review[]
+  products         Product[]
+  followers        CompanyFollow[]
+  complaints       Complaint[]
   complaintReplies ComplaintReply[]
 }
 
@@ -128,22 +130,22 @@ model Product {
   category    Category
   createdAt   DateTime @default(now())
 
-  reviews     Review[]
-  complaints  Complaint[]
+  reviews    Review[]
+  complaints Complaint[]
 }
 
 model Review {
-  id            String       @id @default(cuid())
-  title         String
-  content       String
-  authorId      String
-  author        User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  companyId    String?
-  company       Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  productId    String?
-  product       Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  overallScore  Float
+  overallScore   Float
   criteriaScores Json
 
   media         Media[]
@@ -155,9 +157,14 @@ model Review {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  comments      Comment[]
-  reactions     Reaction[]
-  helpfulVotes  HelpfulVote[]
+  comments     Comment[]
+  reactions    Reaction[]
+  helpfulVotes HelpfulVote[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([status, createdAt])
+  @@index([authorId, createdAt])
 }
 
 model Post {
@@ -173,22 +180,22 @@ model Post {
 }
 
 model Comment {
-  id          String   @id @default(cuid())
-  content     String
-  authorId    String
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  reviewId    String?
-  review      Review?  @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  postId      String?
-  post        Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  complaintId String?
-  complaint   Complaint? @relation(fields: [complaintId], references: [id], onDelete: Cascade)
-  parentId    String?
-  parent      Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies     Comment[] @relation("CommentReplies")
-  helpfulCount Int     @default(0)
-  downVoteCount Int     @default(0)
-  createdAt   DateTime @default(now())
+  id            String     @id @default(cuid())
+  content       String
+  authorId      String
+  author        User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reviewId      String?
+  review        Review?    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  postId        String?
+  post          Post?      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  complaintId   String?
+  complaint     Complaint? @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  parentId      String?
+  parent        Comment?   @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       Comment[]  @relation("CommentReplies")
+  helpfulCount  Int        @default(0)
+  downVoteCount Int        @default(0)
+  createdAt     DateTime   @default(now())
 
   reactions Reaction[]
   votes     CommentVote[]
@@ -200,14 +207,14 @@ model Reaction {
   userId      String
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   reviewId    String?
-  review      Review?     @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  review      Review?      @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   postId      String?
-  post        Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post        Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
   commentId   String?
-  comment     Comment?    @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  comment     Comment?     @relation(fields: [commentId], references: [id], onDelete: Cascade)
   complaintId String?
-  complaint   Complaint?  @relation(fields: [complaintId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
+  complaint   Complaint?   @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
 
   @@unique([userId, reviewId, type])
   @@unique([userId, postId, type])
@@ -269,38 +276,43 @@ model CompanyFollow {
 }
 
 model HelpfulVote {
-  id       String   @id @default(cuid())
-  userId   String
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reviewId String
-  review   Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  voteType VoteType @default(UP)
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  voteType  VoteType @default(UP)
   createdAt DateTime @default(now())
 
   @@unique([userId, reviewId])
 }
 
 model Complaint {
-  id            String       @id @default(cuid())
+  id            String          @id @default(cuid())
   title         String
   content       String
   authorId      String
-  author        User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author        User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
   companyId     String?
-  company       Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company       Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   productId     String?
-  product       Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product       Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
   status        ComplaintStatus @default(OPEN)
-  helpfulCount  Int          @default(0)
-  downVoteCount Int          @default(0)
-  reportCount   Int          @default(0)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  helpfulCount  Int             @default(0)
+  downVoteCount Int             @default(0)
+  reportCount   Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
-  comments      Comment[]
-  reactions     Reaction[]
-  votes         ComplaintVote[]
-  replies       ComplaintReply[]
+  comments  Comment[]
+  reactions Reaction[]
+  votes     ComplaintVote[]
+  replies   ComplaintReply[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([status, createdAt])
+  @@index([authorId, createdAt])
 }
 
 enum ComplaintStatus {
@@ -322,13 +334,13 @@ model ComplaintReply {
 }
 
 model ComplaintVote {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   complaintId String
-  complaint    Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
-  voteType     VoteType @default(UP)
-  createdAt    DateTime @default(now())
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  voteType    VoteType  @default(UP)
+  createdAt   DateTime  @default(now())
 
   @@unique([userId, complaintId])
 }
@@ -346,12 +358,12 @@ model CommentVote {
 }
 
 model Report {
-  id        String       @id @default(cuid())
-  reporterId String
-  reviewId  String?
-  commentId String?
+  id          String       @id @default(cuid())
+  reporterId  String
+  reviewId    String?
+  commentId   String?
   complaintId String?
-  reason    String
-  status    ReportStatus @default(PENDING)
-  createdAt DateTime     @default(now())
+  reason      String
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
 }
