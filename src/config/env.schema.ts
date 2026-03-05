@@ -11,6 +11,10 @@ const envSchema = z
       .transform((v) => (v ? parseInt(v, 10) : 8000)),
     JWT_SECRET: z.string().optional(),
     CORS_ORIGIN: z.string().optional(),
+    /** Admin login: email (must match exactly). */
+    ADMIN_EMAIL: z.string().optional(),
+    /** Admin login: bcrypt hash of password. Generate with: node -e "require('bcryptjs').hash('yourpassword', 10).then(h=>console.log(h))" */
+    ADMIN_PASSWORD_HASH: z.string().optional(),
   })
   .refine(
     (data) => {
@@ -34,6 +38,8 @@ export function validateEnv(): EnvConfig {
     PORT: process.env.PORT,
     JWT_SECRET: process.env.JWT_SECRET,
     CORS_ORIGIN: process.env.CORS_ORIGIN,
+    ADMIN_EMAIL: process.env.ADMIN_EMAIL,
+    ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH,
   });
 
   if (!parsed.success) {

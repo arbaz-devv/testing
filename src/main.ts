@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Server as HttpServer } from 'http';
 import helmet from 'helmet';
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { Server } from 'socket.io';
 import { AppModule } from './app.module';
@@ -16,6 +17,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    }),
+  );
   app.useGlobalFilters(new AllExceptionsFilter());
 
   app.use(
@@ -38,7 +47,7 @@ async function bootstrap() {
     origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key'],
   });
 
   const allowedOrigins =

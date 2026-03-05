@@ -42,6 +42,14 @@ export class ConfigService implements OnModuleInit {
     return this.getOrThrow().CORS_ORIGIN ?? '';
   }
 
+  get adminEmail(): string | undefined {
+    return this.getOrThrow().ADMIN_EMAIL;
+  }
+
+  get adminPasswordHash(): string | undefined {
+    return this.getOrThrow().ADMIN_PASSWORD_HASH;
+  }
+
   get isProduction(): boolean {
     return this.getOrThrow().NODE_ENV === 'production';
   }
