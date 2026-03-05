@@ -362,15 +362,18 @@ export class AdminService {
   async getReviews(params: {
     page: number;
     limit: number;
+    includeTotal?: boolean;
     status?: ReviewStatus;
     q?: string;
     dateFrom?: string;
     dateTo?: string;
   }) {
     const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const includeTotal = params.includeTotal ?? true;
     const cacheKey = JSON.stringify({
       page: p,
       limit: l,
+      includeTotal,
       status: params.status ?? null,
       q: params.q ?? null,
       dateFrom: params.dateFrom ?? null,
@@ -397,21 +400,21 @@ export class AdminService {
         { company: { name: { contains: q, mode: 'insensitive' } } },
       ];
     }
-    const [reviews, total] = await Promise.all([
-      this.prisma.review.findMany({
-        where,
-        skip: (p - 1) * l,
-        take: l,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          author: { select: { id: true, username: true, name: true } },
-          product: { select: { id: true, name: true, slug: true } },
-          company: { select: { id: true, name: true, slug: true } },
-          _count: { select: { comments: true } },
-        },
-      }),
-      this.prisma.review.count({ where }),
-    ]);
+    const reviewsPromise = this.prisma.review.findMany({
+      where,
+      skip: (p - 1) * l,
+      take: l,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        author: { select: { id: true, username: true, name: true } },
+        product: { select: { id: true, name: true, slug: true } },
+        company: { select: { id: true, name: true, slug: true } },
+        _count: { select: { comments: true } },
+      },
+    });
+    const [reviews, total] = includeTotal
+      ? await Promise.all([reviewsPromise, this.prisma.review.count({ where })])
+      : await Promise.all([reviewsPromise, Promise.resolve(0)]);
     const list = reviews.map((r) => ({
       id: r.id,
       title: r.title,
@@ -429,7 +432,12 @@ export class AdminService {
     }));
     const result = {
       reviews: list,
-      pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
+      pagination: {
+        page: p,
+        limit: l,
+        total,
+        totalPages: includeTotal ? Math.ceil(total / l) : 0,
+      },
     };
     reviewsListCache.set(cacheKey, {
       data: result,

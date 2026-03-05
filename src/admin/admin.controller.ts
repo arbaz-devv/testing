@@ -53,6 +53,7 @@ export class AdminController {
     return this.admin.getReviews({
       page,
       limit,
+      includeTotal: query.includeTotal ?? true,
       status: query.status,
       q: query.q,
       dateFrom: query.dateFrom,

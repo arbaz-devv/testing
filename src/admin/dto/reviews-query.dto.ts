@@ -3,6 +3,7 @@ import {
   IsString,
   IsDateString,
   IsEnum,
+  IsBoolean,
   MaxLength,
 } from 'class-validator';
 import { ReviewStatus } from '@prisma/client';
@@ -11,6 +12,18 @@ import { PageLimitDto } from './page-limit.dto';
 import { IsDateRangeValid } from './date-range.validator';
 
 export class ReviewsQueryDto extends PageLimitDto {
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value !== 'string') return value;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'includeTotal must be a boolean value (true or false)' })
+  includeTotal?: boolean = true;
+
   @IsOptional()
   @Transform(({ value }) =>
     typeof value === 'string' ? value.toUpperCase().trim() : value,
