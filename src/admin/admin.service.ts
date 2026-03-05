@@ -3,6 +3,40 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReviewStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 
+/**
+ * Backend in-memory caches (admin APIs)
+ * -------------------------------------
+ * All caches are keyed and stored in process memory. No Redis.
+ *
+ * How it works:
+ * - First request (cold): runs the real DB/query, stores result with expiry = now + TTL.
+ * - Later request with same key within TTL (warm): returns cached copy immediately.
+ * - When writing a new entry we evict any expired keys so the Map doesn't grow forever.
+ *
+ * TTL is 30 seconds for all. Same request params = same cache key.
+ * After 30s the next request is cold again and repopulates the cache.
+ */
+const REVIEWS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const reviewsListCache = new Map<
+  string,
+  { data: { reviews: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+>();
+
+const STATS_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+let statsCache: { data: Record<string, number>; expiry: number } | null = null;
+
+const USERS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const usersListCache = new Map<
+  string,
+  { data: { users: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+>();
+
+const RATINGS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const ratingsListCache = new Map<
+  string,
+  { data: { ratings: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+>();
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
@@ -34,11 +68,14 @@ export class AdminService {
   }
 
   async getStats() {
+    const now = Date.now();
+    if (statsCache && statsCache.expiry > now) return statsCache.data;
+
     const startOfToday = this.startOfToday();
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const [
       totalUsers,
-      activeToday,
+      activeTodayResult,
       pendingReviews,
       flaggedContent,
       totalReviews,
@@ -47,10 +84,9 @@ export class AdminService {
       openComplaints,
     ] = await Promise.all([
       this.prisma.user.count(),
-      this.prisma.session.findMany({ where: { createdAt: { gte: startOfToday } }, select: { userId: true } }).then((sessions) => {
-        const distinct = new Set(sessions.map((s) => s.userId));
-        return distinct.size;
-      }),
+      this.prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(DISTINCT "userId") as count FROM "Session" WHERE "createdAt" >= ${startOfToday}
+      `.then((rows) => Number(rows[0]?.count ?? 0)),
       this.prisma.review.count({ where: { status: 'PENDING' } }),
       this.prisma.review.count({ where: { status: 'FLAGGED' } }),
       this.prisma.review.count(),
@@ -60,9 +96,9 @@ export class AdminService {
       }),
       this.prisma.complaint.count({ where: { status: 'OPEN' } }),
     ]);
-    return {
+    const data = {
       totalUsers,
-      activeToday,
+      activeToday: activeTodayResult,
       pendingReviews,
       flaggedContent,
       totalRatings: productsCount,
@@ -71,6 +107,8 @@ export class AdminService {
       openComplaints,
       newFeedbacks: 0,
     };
+    statsCache = { data, expiry: now + STATS_CACHE_TTL_MS };
+    return data;
   }
 
   async getUsers(params: {
@@ -81,6 +119,19 @@ export class AdminService {
     dateTo?: string;
   }) {
     const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const cacheKey = JSON.stringify({
+      page: p,
+      limit: l,
+      q: params.q ?? null,
+      dateFrom: params.dateFrom ?? null,
+      dateTo: params.dateTo ?? null,
+    });
+    const now = Date.now();
+    const hit = usersListCache.get(cacheKey);
+    if (hit && hit.expiry > now) {
+      return { users: [...hit.data.users], pagination: { ...hit.data.pagination } };
+    }
+
     const where: { createdAt?: { gte?: Date; lte?: Date }; OR?: Array<{ email?: { contains: string; mode: 'insensitive' }; name?: { contains: string; mode: 'insensitive' }; username?: { contains: string; mode: 'insensitive' } }> } = {};
     const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
     if (createdAtRange) where.createdAt = createdAtRange;
@@ -122,10 +173,19 @@ export class AdminService {
       reviewCount: u._count.reviews,
       lastActive: '-',
     }));
-    return {
+    const result = {
       users: list,
       pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
     };
+    usersListCache.set(cacheKey, {
+      data: result,
+      expiry: now + USERS_LIST_CACHE_TTL_MS,
+    });
+    for (const key of usersListCache.keys()) {
+      const e = usersListCache.get(key);
+      if (e && e.expiry <= Date.now()) usersListCache.delete(key);
+    }
+    return result;
   }
 
   async getUserDetail(id: string, lazy = false) {
@@ -308,6 +368,20 @@ export class AdminService {
     dateTo?: string;
   }) {
     const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const cacheKey = JSON.stringify({
+      page: p,
+      limit: l,
+      status: params.status ?? null,
+      q: params.q ?? null,
+      dateFrom: params.dateFrom ?? null,
+      dateTo: params.dateTo ?? null,
+    });
+    const now = Date.now();
+    const hit = reviewsListCache.get(cacheKey);
+    if (hit && hit.expiry > now) {
+      return { ...hit.data, reviews: [...hit.data.reviews] };
+    }
+
     const where: Prisma.ReviewWhereInput = {};
     if (params.status) where.status = params.status;
     const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
@@ -342,7 +416,6 @@ export class AdminService {
       id: r.id,
       title: r.title,
       excerpt: r.content.slice(0, 120) + (r.content.length > 120 ? '...' : ''),
-      body: r.content,
       author: r.author?.name ?? r.author?.username ?? 'Unknown',
       authorId: r.authorId,
       productName: r.product?.name ?? r.company?.name ?? '-',
@@ -354,10 +427,19 @@ export class AdminService {
       createdAt: r.createdAt.toISOString(),
       commentCount: r._count.comments,
     }));
-    return {
+    const result = {
       reviews: list,
       pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
     };
+    reviewsListCache.set(cacheKey, {
+      data: result,
+      expiry: now + REVIEWS_LIST_CACHE_TTL_MS,
+    });
+    for (const key of reviewsListCache.keys()) {
+      const e = reviewsListCache.get(key);
+      if (e && e.expiry <= Date.now()) reviewsListCache.delete(key);
+    }
+    return result;
   }
 
   async getReview(id: string, lazy = false) {
@@ -510,29 +592,78 @@ export class AdminService {
 
   async getRatings(params: { page: number; limit: number }) {
     const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
-    const products = await this.prisma.product.findMany({
-      skip: (p - 1) * l,
-      take: l,
-      orderBy: { name: 'asc' },
-      include: {
-        company: { select: { name: true } },
-        _count: { select: { reviews: true } },
-        reviews: {
-          select: { overallScore: true, status: true, createdAt: true },
-        },
-      },
-    });
+    const cacheKey = `${p}:${l}`;
+    const now = Date.now();
+    const hit = ratingsListCache.get(cacheKey);
+    if (hit && hit.expiry > now) {
+      return { ratings: [...hit.data.ratings], pagination: { ...hit.data.pagination } };
+    }
+
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        skip: (p - 1) * l,
+        take: l,
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          category: true,
+          company: { select: { name: true } },
+          _count: { select: { reviews: true } },
+        },
+      }),
+      this.prisma.product.count(),
+    ]);
+
+    const productIds = products.map((prod) => prod.id);
+    if (productIds.length === 0) {
+      const result = {
+        ratings: [],
+        pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
+      };
+      ratingsListCache.set(cacheKey, { data: result, expiry: now + RATINGS_LIST_CACHE_TTL_MS });
+      return result;
+    }
+
+    const [approvedAgg, newWeekAgg] = await Promise.all([
+      this.prisma.review.groupBy({
+        by: ['productId'],
+        where: { productId: { in: productIds }, status: 'APPROVED' },
+        _avg: { overallScore: true },
+        _count: true,
+        _max: { createdAt: true },
+      }),
+      this.prisma.review.groupBy({
+        by: ['productId'],
+        where: {
+          productId: { in: productIds },
+          status: 'APPROVED',
+          createdAt: { gte: oneWeekAgo },
+        },
+        _count: true,
+      }),
+    ]);
+
+    const productIdSet = new Set(productIds);
+    const approvedByProduct = new Map(
+      approvedAgg
+        .filter((r) => r.productId != null && productIdSet.has(r.productId))
+        .map((r) => [r.productId!, r] as const),
+    );
+    const newWeekByProduct = new Map(
+      newWeekAgg
+        .filter((r) => r.productId != null && productIdSet.has(r.productId))
+        .map((r) => [r.productId!, r._count] as const),
+    );
+
     const list = products.map((prod) => {
-      const approved = prod.reviews.filter((r) => r.status === 'APPROVED');
-      const avgScore =
-        approved.length
-          ? approved.reduce((s, r) => s + r.overallScore, 0) / approved.length
-          : 0;
-      const newThisWeek = prod.reviews.filter((r) => new Date(r.createdAt) >= oneWeekAgo).length;
-      const lastReview = prod.reviews.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0];
+      const agg = approvedByProduct.get(prod.id);
+      const approvedCount = agg?._count ?? 0;
+      const avgScore = agg?._avg?.overallScore ?? 0;
+      const lastAt = agg?._max?.createdAt;
+      const newThisWeek = newWeekByProduct.get(prod.id) ?? 0;
       return {
         id: prod.id,
         productName: prod.name,
@@ -541,15 +672,23 @@ export class AdminService {
         score: Math.round(avgScore * 10) / 10,
         reviewCount: prod._count.reviews,
         submittedBy: prod.company?.name ?? '-',
-        updatedAt: lastReview ? new Date(lastReview.createdAt).toISOString().slice(0, 10) : '-',
-        status: approved.length > 0 ? 'published' : 'pending',
+        updatedAt: lastAt ? lastAt.toISOString().slice(0, 10) : '-',
+        status: approvedCount > 0 ? 'published' : 'pending',
         trend: (newThisWeek > 0 ? 'up' : 'stable') as 'up' | 'stable',
       };
     });
-    const total = await this.prisma.product.count();
-    return {
+    const result = {
       ratings: list,
       pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
     };
+    ratingsListCache.set(cacheKey, {
+      data: result,
+      expiry: now + RATINGS_LIST_CACHE_TTL_MS,
+    });
+    for (const key of ratingsListCache.keys()) {
+      const e = ratingsListCache.get(key);
+      if (e && e.expiry <= Date.now()) ratingsListCache.delete(key);
+    }
+    return result;
   }
 }

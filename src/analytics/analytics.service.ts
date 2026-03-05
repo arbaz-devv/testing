@@ -105,6 +105,14 @@ export interface AnalyticsStats {
   };
 }
 
+export const dynamic = "force-dynamic";
+
+const STATS_CACHE_TTL_MS = 60 * 1000; // 1 minute
+const statsCache = new Map<
+  string,
+  { data: AnalyticsStats; expiry: number }
+>();
+
 @Injectable()
 export class AnalyticsService implements OnModuleDestroy {
   private redis: Redis | null = null;
@@ -583,9 +591,17 @@ export class AnalyticsService implements OnModuleDestroy {
    * Returns aggregated analytics for the full date range [from, to].
    * All metrics (pageviews, uniques, sessions, avg duration, bounce rate, likes, funnel, etc.)
    * are computed over this range. Only activeToday is for the single day "today".
+   * Results are cached in memory for 1 minute per (from, to) to speed up repeated requests.
    */
   async getStats(from: string, to: string): Promise<AnalyticsStats | null> {
     if (!this.redis || !this.redisReady) return this.emptyStats(from, to);
+
+    const cacheKey = `${from}:${to}`;
+    const now = Date.now();
+    const hit = statsCache.get(cacheKey);
+    if (hit && hit.expiry > now) {
+      return { ...hit.data };
+    }
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
@@ -788,7 +804,7 @@ export class AnalyticsService implements OnModuleDestroy {
       ? (funnelEventCounts.purchase / funnelEventCounts.signup_started) * 100
       : 0;
 
-    return {
+    const result = {
       totalPageviews,
       totalUniques,
       totalSessions,
@@ -826,6 +842,15 @@ export class AnalyticsService implements OnModuleDestroy {
       byHourTz: Object.keys(byHourTz).length > 0 ? byHourTz : undefined,
       retention,
     };
+    statsCache.set(cacheKey, {
+      data: result,
+      expiry: now + STATS_CACHE_TTL_MS,
+    });
+    for (const key of statsCache.keys()) {
+      const entry = statsCache.get(key);
+      if (entry !== undefined && entry.expiry <= Date.now()) statsCache.delete(key);
+    }
+    return result;
   }
 
   isEnabled(): boolean {
