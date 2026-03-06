@@ -53,9 +53,9 @@ function parseForwardedHeader(value: string): string[] {
   return value
     .split(',')
     .map((part) => {
-      const match = part.match(/for=(\"?\[?[a-fA-F0-9:.%]+\]?\"?)/i);
+      const match = part.match(/for=("?\[?[a-fA-F0-9:.%]+\]?"?)/i);
       if (!match?.[1]) return '';
-      return match[1].replace(/^\"|\"$/g, '');
+      return match[1].replace(/^"|"$|^'|'$/g, '');
     })
     .filter(Boolean);
 }
@@ -78,7 +78,10 @@ function getClientIp(req: Request): string {
     const value = firstHeader(req, header);
     if (!value) continue;
     const best = pickBestIp(
-      value.split(',').map((part) => part.trim()).filter((part) => part && part.toLowerCase() !== 'unknown'),
+      value
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part && part.toLowerCase() !== 'unknown'),
     );
     if (best) return best;
   }
@@ -118,7 +121,8 @@ export class AnalyticsController {
   track(@Req() req: Request, @Body() body: TrackDto): { ok: boolean } {
     const ip = getClientIp(req);
     const countryHint = getCountryHint(req);
-    const userAgent = (req.headers['user-agent'] as string) || body.device || '';
+    const userAgent =
+      (req.headers['user-agent'] as string) || body.device || '';
     void this.analyticsService.track(ip, userAgent, body, countryHint);
     return { ok: true };
   }
@@ -133,7 +137,11 @@ export class AnalyticsController {
     if (apiKey && apiKey.length > 0 && key !== apiKey) {
       return { ok: false, error: 'Unauthorized' };
     }
-    const fromDate = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const fromDate =
+      from ||
+      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
     const toDate = to || new Date().toISOString().slice(0, 10);
     const data = await this.analyticsService.getStats(fromDate, toDate);
     if (data === null) {
@@ -168,9 +176,12 @@ export class AnalyticsController {
   }
 
   @Get('realtime')
-  async realtime(
-    @Query('key') key?: string,
-  ): Promise<{ ok: boolean; activeNow?: number; byCountry?: Record<string, number>; error?: string }> {
+  async realtime(@Query('key') key?: string): Promise<{
+    ok: boolean;
+    activeNow?: number;
+    byCountry?: Record<string, number>;
+    error?: string;
+  }> {
     const apiKey = process.env.ANALYTICS_API_KEY;
     if (apiKey && apiKey.length > 0 && key !== apiKey) {
       return { ok: false, error: 'Unauthorized' };
@@ -184,7 +195,11 @@ export class AnalyticsController {
   async latestMembers(
     @Query('limit') limit = '8',
     @Query('key') key?: string,
-  ): Promise<{ ok: boolean; members?: { id: string; name: string; date: string }[]; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    members?: { id: string; name: string; date: string }[];
+    error?: string;
+  }> {
     const apiKey = process.env.ANALYTICS_API_KEY;
     if (apiKey && apiKey.length > 0 && key !== apiKey) {
       return { ok: false, error: 'Unauthorized' };
@@ -206,7 +221,12 @@ export class AnalyticsController {
         let date: string;
         if (d === today) date = 'Today';
         else if (d === yesterdayStr) date = 'Yesterday';
-        else date = u.createdAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        else
+          date = u.createdAt.toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          });
         return {
           id: u.id,
           name: u.name || u.username || 'User',
@@ -215,7 +235,8 @@ export class AnalyticsController {
       });
       return { ok: true, members };
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to fetch latest members';
+      const message =
+        e instanceof Error ? e.message : 'Failed to fetch latest members';
       return { ok: false, error: message };
     }
   }

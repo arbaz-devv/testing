@@ -3,14 +3,24 @@ import { isIP } from 'node:net';
 import Redis from 'ioredis';
 import * as geoip from 'geoip-lite';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const UAParser = require('ua-parser-js') as new (ua?: string) => { getResult: () => { device?: { type?: string }; browser?: { name?: string }; os?: { name?: string } } };
+const UAParser = require('ua-parser-js') as new (ua?: string) => {
+  getResult: () => {
+    device?: { type?: string };
+    browser?: { name?: string };
+    os?: { name?: string };
+  };
+};
 
 const KEY_PREFIX = 'analytics';
 const KEY_RECENT_SESSIONS = `${KEY_PREFIX}:recent_sessions`;
 const RECENT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const TTL_DAYS = 32;
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]{8,128}$/;
-const FUNNEL_EVENTS = ['signup_started', 'signup_completed', 'purchase'] as const;
+const FUNNEL_EVENTS = [
+  'signup_started',
+  'signup_completed',
+  'purchase',
+] as const;
 type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 const LIKE_EVENT = 'like';
 const DURATION_BUCKETS: Array<{ max: number; label: string }> = [
@@ -31,7 +41,7 @@ export interface TrackPayload {
   event?: 'page_view' | 'page_leave' | FunnelEvent | 'like';
   sessionId?: string;
   enteredAt?: string; // ISO date
-  leftAt?: string;   // ISO date
+  leftAt?: string; // ISO date
   referrer?: string;
   utm_source?: string;
   utm_medium?: string;
@@ -105,13 +115,10 @@ export interface AnalyticsStats {
   };
 }
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 const STATS_CACHE_TTL_MS = 60 * 1000; // 1 minute
-const statsCache = new Map<
-  string,
-  { data: AnalyticsStats; expiry: number }
->();
+const statsCache = new Map<string, { data: AnalyticsStats; expiry: number }>();
 
 @Injectable()
 export class AnalyticsService implements OnModuleDestroy {
@@ -134,7 +141,8 @@ export class AnalyticsService implements OnModuleDestroy {
         this.redis.on('error', (error: unknown) => {
           this.enabled = false;
           this.redisReady = false;
-          this.lastRedisError = error instanceof Error ? error.message : 'Unknown Redis error';
+          this.lastRedisError =
+            error instanceof Error ? error.message : 'Unknown Redis error';
           console.error('Analytics Redis error:', this.lastRedisError);
         });
         this.redis.on('end', () => {
@@ -144,8 +152,14 @@ export class AnalyticsService implements OnModuleDestroy {
       } catch (error) {
         this.enabled = false;
         this.redisReady = false;
-        this.lastRedisError = error instanceof Error ? error.message : 'Failed to initialize Redis client';
-        console.error('Failed to initialize analytics Redis client:', this.lastRedisError);
+        this.lastRedisError =
+          error instanceof Error
+            ? error.message
+            : 'Failed to initialize Redis client';
+        console.error(
+          'Failed to initialize analytics Redis client:',
+          this.lastRedisError,
+        );
       }
       return;
     }
@@ -177,7 +191,11 @@ export class AnalyticsService implements OnModuleDestroy {
     await this.redis.expire(key, TTL_DAYS * 24 * 60 * 60);
   }
 
-  private async hincrby(key: string, field: string, delta: number): Promise<void> {
+  private async hincrby(
+    key: string,
+    field: string,
+    delta: number,
+  ): Promise<void> {
     if (!this.redis) return;
     await this.redis.hincrby(key, field, delta);
     await this.redis.expire(key, TTL_DAYS * 24 * 60 * 60);
@@ -234,7 +252,12 @@ export class AnalyticsService implements OnModuleDestroy {
         if (!part) return '';
         if (/^\d+$/.test(part)) return ':id';
         if (/^[0-9a-f]{8,}$/i.test(part)) return ':id';
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(part)) return ':id';
+        if (
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            part,
+          )
+        )
+          return ':id';
         return part;
       })
       .join('/');
@@ -252,8 +275,15 @@ export class AnalyticsService implements OnModuleDestroy {
     if (!this.redis) return;
     try {
       await this.redis.zadd(KEY_RECENT_SESSIONS, nowMs, member);
-      await this.redis.zremrangebyscore(KEY_RECENT_SESSIONS, '-inf', nowMs - RECENT_WINDOW_MS);
-      await this.redis.expire(KEY_RECENT_SESSIONS, Math.ceil(RECENT_WINDOW_MS / 1000) + 60);
+      await this.redis.zremrangebyscore(
+        KEY_RECENT_SESSIONS,
+        '-inf',
+        nowMs - RECENT_WINDOW_MS,
+      );
+      await this.redis.expire(
+        KEY_RECENT_SESSIONS,
+        Math.ceil(RECENT_WINDOW_MS / 1000) + 60,
+      );
     } catch {
       // non-fatal
     }
@@ -348,12 +378,16 @@ export class AnalyticsService implements OnModuleDestroy {
     return /^[A-Z]{2}$/.test((code || '').trim().toUpperCase());
   }
 
-  private async resolveCountry(ip: string, countryHint?: string): Promise<string> {
+  private async resolveCountry(
+    ip: string,
+    countryHint?: string,
+  ): Promise<string> {
     const hint = (countryHint || '').trim().toUpperCase();
     if (this.isValidCountryCode(hint)) return hint;
 
     const normalizedIp = this.normalizeIp(ip);
-    if (!normalizedIp || this.isPrivateOrLocalIp(normalizedIp)) return 'unknown';
+    if (!normalizedIp || this.isPrivateOrLocalIp(normalizedIp))
+      return 'unknown';
 
     const cacheKey = `${KEY_PREFIX}:ip_country:${normalizedIp}`;
     if (this.redis) {
@@ -372,9 +406,14 @@ export class AnalyticsService implements OnModuleDestroy {
     // Fallback to external API only if still unknown
     if (!countryCode || countryCode === 'UNKNOWN') {
       try {
-        const res = await fetch(`https://ipwho.is/${encodeURIComponent(normalizedIp)}?fields=success,country_code`);
+        const res = await fetch(
+          `https://ipwho.is/${encodeURIComponent(normalizedIp)}?fields=success,country_code`,
+        );
         if (res.ok) {
-          const json = (await res.json()) as { success?: boolean; country_code?: string };
+          const json = (await res.json()) as {
+            success?: boolean;
+            country_code?: string;
+          };
           if (json.success === true && json.country_code) {
             countryCode = json.country_code.toUpperCase();
           }
@@ -398,7 +437,11 @@ export class AnalyticsService implements OnModuleDestroy {
     return countryCode;
   }
 
-  private getGeo(ip: string): { country?: string; city?: string; region?: string } {
+  private getGeo(ip: string): {
+    country?: string;
+    city?: string;
+    region?: string;
+  } {
     const geo = geoip.lookup(ip);
     if (!geo) return {};
     return {
@@ -408,14 +451,24 @@ export class AnalyticsService implements OnModuleDestroy {
     };
   }
 
-  private getDeviceAndBrowser(userAgent: string): { device: string; browser: string; os: string } {
+  private getDeviceAndBrowser(userAgent: string): {
+    device: string;
+    browser: string;
+    os: string;
+  } {
     const parser = new UAParser(userAgent || '');
-    const result = parser.getResult() as { device?: { type?: string }; browser?: { name?: string }; os?: { name?: string } };
+    const result = parser.getResult() as {
+      device?: { type?: string };
+      browser?: { name?: string };
+      os?: { name?: string };
+    };
     const d = (result.device?.type || 'desktop').toLowerCase();
     const deviceType = d === 'mobile' || d === 'tablet' ? d : 'desktop';
     return {
       device: deviceType,
-      browser: (result.browser?.name || 'unknown').toLowerCase().replace(/\s+/g, '_'),
+      browser: (result.browser?.name || 'unknown')
+        .toLowerCase()
+        .replace(/\s+/g, '_'),
       os: (result.os?.name || 'unknown').toLowerCase().replace(/\s+/g, '_'),
     };
   }
@@ -432,14 +485,21 @@ export class AnalyticsService implements OnModuleDestroy {
   }
 
   /** Non-blocking: enqueue track and return immediately. Only store when consent is not explicitly false. */
-  async track(ip: string, userAgent: string, body: TrackPayload, countryHint?: string): Promise<void> {
+  async track(
+    ip: string,
+    userAgent: string,
+    body: TrackPayload,
+    countryHint?: string,
+  ): Promise<void> {
     if (!this.enabled || !this.redis || !this.redisReady) return;
     if (body.consent === false) return;
 
     const now = new Date();
     const day = this.dayKey(now);
     const countryCode = await this.resolveCountry(ip, countryHint);
-    const { device, browser, os } = this.getDeviceAndBrowser(userAgent || body.device || '');
+    const { device, browser, os } = this.getDeviceAndBrowser(
+      userAgent || body.device || '',
+    );
     const path = this.normalizePath(body.path);
     const sessionId = this.normalizeSessionId(body.sessionId);
     const referrer = this.referrerLabel(body.referrer);
@@ -471,34 +531,68 @@ export class AnalyticsService implements OnModuleDestroy {
         this.addRecentSession(nowMs, member),
       ];
       const cohortTtl = 35 * 24 * 60 * 60;
-      this.redis.set(`${KEY_PREFIX}:first_visit:${sessionId}`, day, 'EX', cohortTtl, 'NX').then((reply) => {
-        if (reply === 'OK' && this.redis) {
-          this.redis.sadd(`${KEY_PREFIX}:cohort:${day}`, sessionId).catch(() => {});
-          this.redis.expire(`${KEY_PREFIX}:cohort:${day}`, cohortTtl).catch(() => {});
-        }
-      }).catch(() => {});
-      if (body.timezone && typeof body.timezone === 'string' && body.timezone.trim()) {
+      this.redis
+        .set(
+          `${KEY_PREFIX}:first_visit:${sessionId}`,
+          day,
+          'EX',
+          cohortTtl,
+          'NX',
+        )
+        .then((reply) => {
+          if (reply === 'OK' && this.redis) {
+            this.redis
+              .sadd(`${KEY_PREFIX}:cohort:${day}`, sessionId)
+              .catch(() => {});
+            this.redis
+              .expire(`${KEY_PREFIX}:cohort:${day}`, cohortTtl)
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+      if (
+        body.timezone &&
+        typeof body.timezone === 'string' &&
+        body.timezone.trim()
+      ) {
         try {
           const tz = body.timezone.trim();
-          const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour: '2-digit', hour12: false });
+          const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: tz,
+            hour: '2-digit',
+            hour12: false,
+          });
           const parts = formatter.formatToParts(now);
           const hourPart = parts.find((p) => p.type === 'hour');
-          const localHour = hourPart ? String(parseInt(hourPart.value, 10) % 24) : hour;
-          promises.push(this.hincrby(`${KEY_PREFIX}:hour_tz:${day}`, localHour, 1));
+          const localHour = hourPart
+            ? String(parseInt(hourPart.value, 10) % 24)
+            : hour;
+          promises.push(
+            this.hincrby(`${KEY_PREFIX}:hour_tz:${day}`, localHour, 1),
+          );
         } catch {
           // invalid timezone, skip
         }
       }
       void Promise.all(promises).catch((error: unknown) => {
-        this.lastRedisError = error instanceof Error ? error.message : 'Failed writing analytics page_view';
-        console.error('Analytics write error (page_view):', this.lastRedisError);
+        this.lastRedisError =
+          error instanceof Error
+            ? error.message
+            : 'Failed writing analytics page_view';
+        console.error(
+          'Analytics write error (page_view):',
+          this.lastRedisError,
+        );
       });
       return;
     }
 
     if (body.event === LIKE_EVENT) {
       void this.incr(`${KEY_PREFIX}:like:${day}`).catch((error: unknown) => {
-        this.lastRedisError = error instanceof Error ? error.message : 'Failed writing analytics like';
+        this.lastRedisError =
+          error instanceof Error
+            ? error.message
+            : 'Failed writing analytics like';
         console.error('Analytics write error (like):', this.lastRedisError);
       });
       return;
@@ -508,10 +602,17 @@ export class AnalyticsService implements OnModuleDestroy {
       const event = body.event as FunnelEvent;
       void Promise.all([
         this.hincrby(`${KEY_PREFIX}:funnel:event:${day}`, event, 1),
-        this.hincrby(`${KEY_PREFIX}:funnel:source:${day}`, `${utmSource}|${event}`, 1),
+        this.hincrby(
+          `${KEY_PREFIX}:funnel:source:${day}`,
+          `${utmSource}|${event}`,
+          1,
+        ),
         this.hincrby(`${KEY_PREFIX}:funnel:path:${day}`, `${path}|${event}`, 1),
       ]).catch((error: unknown) => {
-        this.lastRedisError = error instanceof Error ? error.message : 'Failed writing funnel analytics';
+        this.lastRedisError =
+          error instanceof Error
+            ? error.message
+            : 'Failed writing funnel analytics';
         console.error('Analytics write error (funnel):', this.lastRedisError);
       });
       return;
@@ -522,39 +623,67 @@ export class AnalyticsService implements OnModuleDestroy {
       const left = new Date(body.leftAt).getTime();
       if (!Number.isNaN(entered) && !Number.isNaN(left) && left > entered) {
         const durationSec = Math.round((left - entered) / 1000);
-        if (durationSec >= 0 && durationSec <= 86400) { // max 24h
+        if (durationSec >= 0 && durationSec <= 86400) {
+          // max 24h
           const durationBucket = this.durationBucket(durationSec);
           void Promise.all([
-            this.hincrby(`${KEY_PREFIX}:duration_hist:${day}`, durationBucket, 1),
+            this.hincrby(
+              `${KEY_PREFIX}:duration_hist:${day}`,
+              durationBucket,
+              1,
+            ),
             this.incrby(`${KEY_PREFIX}:duration_sum:${day}`, durationSec),
             this.incr(`${KEY_PREFIX}:duration_count:${day}`),
           ]).catch((error: unknown) => {
-            this.lastRedisError = error instanceof Error ? error.message : 'Failed writing analytics duration';
-            console.error('Analytics write error (duration):', this.lastRedisError);
+            this.lastRedisError =
+              error instanceof Error
+                ? error.message
+                : 'Failed writing analytics duration';
+            console.error(
+              'Analytics write error (duration):',
+              this.lastRedisError,
+            );
           });
           // Bounce: single pageview + left within 30s
           if (durationSec < 30) {
-            this.hget(`${KEY_PREFIX}:session_pages:${day}`, sessionId).then((count) => {
-              if (count === '1' && this.redis) {
-                void this.incr(`${KEY_PREFIX}:bounces:${day}`).catch(() => {});
-              }
-            }).catch(() => {});
+            this.hget(`${KEY_PREFIX}:session_pages:${day}`, sessionId)
+              .then((count) => {
+                if (count === '1' && this.redis) {
+                  void this.incr(`${KEY_PREFIX}:bounces:${day}`).catch(
+                    () => {},
+                  );
+                }
+              })
+              .catch(() => {});
           }
         }
       }
     }
   }
 
-  private bucketLongTail(source: Record<string, number>, limit: number): Record<string, number> {
+  private bucketLongTail(
+    source: Record<string, number>,
+    limit: number,
+  ): Record<string, number> {
     const sorted = Object.entries(source).sort((a, b) => b[1] - a[1]);
     if (sorted.length <= limit) return source;
     const keep = sorted.slice(0, limit - 1);
-    const other = sorted.slice(limit - 1).reduce((sum, [, value]) => sum + value, 0);
+    const other = sorted
+      .slice(limit - 1)
+      .reduce((sum, [, value]) => sum + value, 0);
     return Object.fromEntries([...keep, ['other', other]]);
   }
 
-  private parseFunnelMap(input: Record<string, number>): Record<string, { signup_started: number; signup_completed: number; purchase: number }> {
-    const out: Record<string, { signup_started: number; signup_completed: number; purchase: number }> = {};
+  private parseFunnelMap(
+    input: Record<string, number>,
+  ): Record<
+    string,
+    { signup_started: number; signup_completed: number; purchase: number }
+  > {
+    const out: Record<
+      string,
+      { signup_started: number; signup_completed: number; purchase: number }
+    > = {};
     Object.entries(input).forEach(([key, value]) => {
       const idx = key.lastIndexOf('|');
       if (idx <= 0) return;
@@ -605,7 +734,8 @@ export class AnalyticsService implements OnModuleDestroy {
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
-    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return null;
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))
+      return null;
 
     const days: string[] = [];
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
@@ -638,17 +768,50 @@ export class AnalyticsService implements OnModuleDestroy {
     const timeSeries: TimeSeriesPoint[] = [];
     let totalLikes = 0;
     const byHourTz: Record<string, number> = {};
-    let retention: { day1Pct: number; day7Pct: number; day30Pct: number; cohortDays: number } | undefined;
+    let retention:
+      | {
+          day1Pct: number;
+          day7Pct: number;
+          day30Pct: number;
+          cohortDays: number;
+        }
+      | undefined;
 
-    const WEEKDAY_NAMES: Record<string, string> = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
+    const WEEKDAY_NAMES: Record<string, string> = {
+      '0': 'Sun',
+      '1': 'Mon',
+      '2': 'Tue',
+      '3': 'Wed',
+      '4': 'Thu',
+      '5': 'Fri',
+      '6': 'Sat',
+    };
 
     try {
       for (const day of days) {
         const [
-          pv, countries, devices, browsers, oss, referrers, utmSources, utmMediums, utmCampaigns,
-          hours, weekdays, paths, bounces, durationHist, durationSumDay, durationCountDay,
-          funnelEvents, funnelBySourceDay, funnelByPathDay, uniquesDay,
-          likeDay, hourTzDay,
+          pv,
+          countries,
+          devices,
+          browsers,
+          oss,
+          referrers,
+          utmSources,
+          utmMediums,
+          utmCampaigns,
+          hours,
+          weekdays,
+          paths,
+          bounces,
+          durationHist,
+          durationSumDay,
+          durationCountDay,
+          funnelEvents,
+          funnelBySourceDay,
+          funnelByPathDay,
+          uniquesDay,
+          likeDay,
+          hourTzDay,
         ] = await Promise.all([
           this.redis.get(`${KEY_PREFIX}:pageviews:${day}`),
           this.redis.hgetall(`${KEY_PREFIX}:country:${day}`),
@@ -680,8 +843,13 @@ export class AnalyticsService implements OnModuleDestroy {
         durationSum += parseInt(durationSumDay || '0', 10);
         durationCount += parseInt(durationCountDay || '0', 10);
 
-        const merge = (acc: Record<string, number>, src?: Record<string, string> | null) => {
-          Object.entries(src || {}).forEach(([k, v]) => { acc[k] = (acc[k] || 0) + parseInt(v, 10); });
+        const merge = (
+          acc: Record<string, number>,
+          src?: Record<string, string> | null,
+        ) => {
+          Object.entries(src || {}).forEach(([k, v]) => {
+            acc[k] = (acc[k] || 0) + parseInt(v, 10);
+          });
         };
         merge(byCountry, countries);
         merge(byDevice, devices);
@@ -696,19 +864,30 @@ export class AnalyticsService implements OnModuleDestroy {
         merge(durationHistogram, durationHist);
         merge(funnelBySourceRaw, funnelBySourceDay);
         merge(funnelByPathRaw, funnelByPathDay);
-        Object.entries(paths || {}).forEach(([k, v]) => { pathCounts[k] = (pathCounts[k] || 0) + parseInt(v, 10); });
+        Object.entries(paths || {}).forEach(([k, v]) => {
+          pathCounts[k] = (pathCounts[k] || 0) + parseInt(v, 10);
+        });
         Object.entries(funnelEvents || {}).forEach(([event, count]) => {
           if (FUNNEL_EVENTS.includes(event as FunnelEvent)) {
             funnelEventCounts[event as FunnelEvent] += parseInt(count, 10);
           }
         });
         totalLikes += parseInt(likeDay || '0', 10);
-        const mergeTz = (acc: Record<string, number>, src?: Record<string, string> | null) => {
-          Object.entries(src || {}).forEach(([k, v]) => { acc[k] = (acc[k] || 0) + parseInt(v, 10); });
+        const mergeTz = (
+          acc: Record<string, number>,
+          src?: Record<string, string> | null,
+        ) => {
+          Object.entries(src || {}).forEach(([k, v]) => {
+            acc[k] = (acc[k] || 0) + parseInt(v, 10);
+          });
         };
         mergeTz(byHourTz, hourTzDay);
 
-        timeSeries.push({ date: day, pageviews: pvNum, uniques: uniquesDay || 0 });
+        timeSeries.push({
+          date: day,
+          pageviews: pvNum,
+          uniques: uniquesDay || 0,
+        });
       }
 
       try {
@@ -718,7 +897,9 @@ export class AnalyticsService implements OnModuleDestroy {
         let totalReturned30 = 0;
         let cohortDaysCount = 0;
         for (const day of days) {
-          const cohortMembers = await this.redis.smembers(`${KEY_PREFIX}:cohort:${day}`);
+          const cohortMembers = await this.redis.smembers(
+            `${KEY_PREFIX}:cohort:${day}`,
+          );
           const cohortSize = cohortMembers.length;
           if (cohortSize === 0) continue;
           cohortDaysCount += 1;
@@ -752,25 +933,44 @@ export class AnalyticsService implements OnModuleDestroy {
         retention = undefined;
       }
     } catch (error) {
-      this.lastRedisError = error instanceof Error ? error.message : 'Failed reading analytics stats';
+      this.lastRedisError =
+        error instanceof Error
+          ? error.message
+          : 'Failed reading analytics stats';
       console.error('Analytics read error:', this.lastRedisError);
       return this.emptyStats(days[0] || from, days[days.length - 1] || to);
     }
 
     const uniqueHllKeys = days.map((day) => `${KEY_PREFIX}:hll:uniques:${day}`);
-    const sessionHllKeys = days.map((day) => `${KEY_PREFIX}:hll:sessions:${day}`);
-    const totalUniques = uniqueHllKeys.length > 0 ? await this.redis.pfcount(...uniqueHllKeys) : 0;
-    const totalSessions = sessionHllKeys.length > 0 ? await this.redis.pfcount(...sessionHllKeys) : 0;
+    const sessionHllKeys = days.map(
+      (day) => `${KEY_PREFIX}:hll:sessions:${day}`,
+    );
+    const totalUniques =
+      uniqueHllKeys.length > 0 ? await this.redis.pfcount(...uniqueHllKeys) : 0;
+    const totalSessions =
+      sessionHllKeys.length > 0
+        ? await this.redis.pfcount(...sessionHllKeys)
+        : 0;
 
     const topPages = Object.entries(pathCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
       .map(([path, pageviews]) => ({ path, pageviews }));
 
-    const avgDurationSeconds = durationCount > 0 ? durationSum / durationCount : 0;
-    const durationP50Seconds = this.approximateDurationPercentile(durationHistogram, durationCount, 0.5);
-    const durationP95Seconds = this.approximateDurationPercentile(durationHistogram, durationCount, 0.95);
-    const bounceRate = totalSessions > 0 ? (totalBounces / totalSessions) * 100 : 0;
+    const avgDurationSeconds =
+      durationCount > 0 ? durationSum / durationCount : 0;
+    const durationP50Seconds = this.approximateDurationPercentile(
+      durationHistogram,
+      durationCount,
+      0.5,
+    );
+    const durationP95Seconds = this.approximateDurationPercentile(
+      durationHistogram,
+      durationCount,
+      0.95,
+    );
+    const bounceRate =
+      totalSessions > 0 ? (totalBounces / totalSessions) * 100 : 0;
 
     const today = this.dayKey(new Date());
     let activeToday = 0;
@@ -788,21 +988,33 @@ export class AnalyticsService implements OnModuleDestroy {
     });
 
     const byReferrerBucketed = this.bucketLongTail(byReferrer, 15);
-    const funnelByUtmSource = Object.entries(this.parseFunnelMap(funnelBySourceRaw))
+    const funnelByUtmSource = Object.entries(
+      this.parseFunnelMap(funnelBySourceRaw),
+    )
       .map(([utmSource, counts]) => ({ utmSource, ...counts }))
-      .sort((a, b) => (b.signup_started + b.purchase) - (a.signup_started + a.purchase))
+      .sort(
+        (a, b) =>
+          b.signup_started + b.purchase - (a.signup_started + a.purchase),
+      )
       .slice(0, 20);
     const funnelByPath = Object.entries(this.parseFunnelMap(funnelByPathRaw))
       .map(([path, counts]) => ({ path, ...counts }))
-      .sort((a, b) => (b.signup_started + b.purchase) - (a.signup_started + a.purchase))
+      .sort(
+        (a, b) =>
+          b.signup_started + b.purchase - (a.signup_started + a.purchase),
+      )
       .slice(0, 20);
 
-    const signupCompletionRate = funnelEventCounts.signup_started > 0
-      ? (funnelEventCounts.signup_completed / funnelEventCounts.signup_started) * 100
-      : 0;
-    const purchaseRate = funnelEventCounts.signup_started > 0
-      ? (funnelEventCounts.purchase / funnelEventCounts.signup_started) * 100
-      : 0;
+    const signupCompletionRate =
+      funnelEventCounts.signup_started > 0
+        ? (funnelEventCounts.signup_completed /
+            funnelEventCounts.signup_started) *
+          100
+        : 0;
+    const purchaseRate =
+      funnelEventCounts.signup_started > 0
+        ? (funnelEventCounts.purchase / funnelEventCounts.signup_started) * 100
+        : 0;
 
     const result = {
       totalPageviews,
@@ -848,7 +1060,8 @@ export class AnalyticsService implements OnModuleDestroy {
     });
     for (const key of statsCache.keys()) {
       const entry = statsCache.get(key);
-      if (entry !== undefined && entry.expiry <= Date.now()) statsCache.delete(key);
+      if (entry !== undefined && entry.expiry <= Date.now())
+        statsCache.delete(key);
     }
     return result;
   }
@@ -858,14 +1071,21 @@ export class AnalyticsService implements OnModuleDestroy {
   }
 
   /** Real-time: active visitors in last 5 minutes and count by country. */
-  async getRealtime(): Promise<{ activeNow: number; byCountry: Record<string, number> }> {
+  async getRealtime(): Promise<{
+    activeNow: number;
+    byCountry: Record<string, number>;
+  }> {
     const out = { activeNow: 0, byCountry: {} as Record<string, number> };
     if (!this.redis || !this.redisReady) return out;
 
     const nowMs = Date.now();
     const minScore = nowMs - RECENT_WINDOW_MS;
     try {
-      const members = await this.redis.zrangebyscore(KEY_RECENT_SESSIONS, minScore, '+inf');
+      const members = await this.redis.zrangebyscore(
+        KEY_RECENT_SESSIONS,
+        minScore,
+        '+inf',
+      );
       const seen = new Set<string>();
       for (const m of members) {
         const idx = m.lastIndexOf(':');
@@ -897,13 +1117,21 @@ export class AnalyticsService implements OnModuleDestroy {
     } catch (error) {
       this.enabled = false;
       this.redisReady = false;
-      this.lastRedisError = error instanceof Error ? error.message : 'Redis ping failed';
-      console.error('Analytics Redis health check failed:', this.lastRedisError);
+      this.lastRedisError =
+        error instanceof Error ? error.message : 'Redis ping failed';
+      console.error(
+        'Analytics Redis health check failed:',
+        this.lastRedisError,
+      );
       return false;
     }
   }
 
-  getHealthDetails(): { configured: boolean; connected: boolean; lastError: string | null } {
+  getHealthDetails(): {
+    configured: boolean;
+    connected: boolean;
+    lastError: string | null;
+  } {
     return {
       configured: Boolean(process.env.REDIS_URL?.trim()),
       connected: this.redisReady,

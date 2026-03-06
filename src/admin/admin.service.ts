@@ -19,7 +19,18 @@ import type { Prisma } from '@prisma/client';
 const REVIEWS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const reviewsListCache = new Map<
   string,
-  { data: { reviews: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+  {
+    data: {
+      reviews: unknown[];
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      };
+    };
+    expiry: number;
+  }
 >();
 
 const STATS_CACHE_TTL_MS = 30 * 1000; // 30 seconds
@@ -28,13 +39,35 @@ let statsCache: { data: Record<string, number>; expiry: number } | null = null;
 const USERS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const usersListCache = new Map<
   string,
-  { data: { users: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+  {
+    data: {
+      users: unknown[];
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      };
+    };
+    expiry: number;
+  }
 >();
 
 const RATINGS_LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const ratingsListCache = new Map<
   string,
-  { data: { ratings: unknown[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; expiry: number }
+  {
+    data: {
+      ratings: unknown[];
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      };
+    };
+    expiry: number;
+  }
 >();
 
 @Injectable()
@@ -118,7 +151,10 @@ export class AdminService {
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const { page: p, limit: l } = this.normalizePagination(
+      params.page,
+      params.limit,
+    );
     const cacheKey = JSON.stringify({
       page: p,
       limit: l,
@@ -129,11 +165,24 @@ export class AdminService {
     const now = Date.now();
     const hit = usersListCache.get(cacheKey);
     if (hit && hit.expiry > now) {
-      return { users: [...hit.data.users], pagination: { ...hit.data.pagination } };
+      return {
+        users: [...hit.data.users],
+        pagination: { ...hit.data.pagination },
+      };
     }
 
-    const where: { createdAt?: { gte?: Date; lte?: Date }; OR?: Array<{ email?: { contains: string; mode: 'insensitive' }; name?: { contains: string; mode: 'insensitive' }; username?: { contains: string; mode: 'insensitive' } }> } = {};
-    const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
+    const where: {
+      createdAt?: { gte?: Date; lte?: Date };
+      OR?: Array<{
+        email?: { contains: string; mode: 'insensitive' };
+        name?: { contains: string; mode: 'insensitive' };
+        username?: { contains: string; mode: 'insensitive' };
+      }>;
+    } = {};
+    const createdAtRange = this.buildCreatedAtRange(
+      params.dateFrom,
+      params.dateTo,
+    );
     if (createdAtRange) where.createdAt = createdAtRange;
     if (params.q?.trim()) {
       const q = params.q.trim();
@@ -175,7 +224,12 @@ export class AdminService {
     }));
     const result = {
       users: list,
-      pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
+      pagination: {
+        page: p,
+        limit: l,
+        total,
+        totalPages: Math.ceil(total / l),
+      },
     };
     usersListCache.set(cacheKey, {
       data: result,
@@ -198,7 +252,13 @@ export class AdminService {
     if (lazy) {
       return {
         lazy: true,
-        deferred: ['metrics', 'activitySeries', 'reviews', 'complaints', 'discussions'],
+        deferred: [
+          'metrics',
+          'activitySeries',
+          'reviews',
+          'complaints',
+          'discussions',
+        ],
         user: {
           id: user.id,
           email: user.email,
@@ -279,7 +339,10 @@ export class AdminService {
       d.setDate(d.getDate() - (6 - idx));
       return d.toISOString().slice(0, 10);
     });
-    const seriesMap: Record<string, { logins: number; comments: number; votes: number }> = {};
+    const seriesMap: Record<
+      string,
+      { logins: number; comments: number; votes: number }
+    > = {};
     dayKeys.forEach((key) => {
       seriesMap[key] = { logins: 0, comments: 0, votes: 0 };
     });
@@ -316,7 +379,11 @@ export class AdminService {
         lastActive: lastActivityDate.toISOString().slice(0, 10),
         lastLoginAt:
           sessions.length > 0
-            ? sessions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0].createdAt.toISOString()
+            ? sessions
+                .sort(
+                  (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+                )[0]
+                .createdAt.toISOString()
             : undefined,
       },
       metrics: {
@@ -343,8 +410,12 @@ export class AdminService {
         id: c.id,
         subject: c.title,
         relatedTo: c.product ? 'product' : c.company ? 'company' : 'general',
-        priority: c.reportCount >= 10 ? 'high' : c.reportCount >= 3 ? 'medium' : 'low',
-        status: c.status.toLowerCase() === 'closed' ? 'dismissed' : c.status.toLowerCase(),
+        priority:
+          c.reportCount >= 10 ? 'high' : c.reportCount >= 3 ? 'medium' : 'low',
+        status:
+          c.status.toLowerCase() === 'closed'
+            ? 'dismissed'
+            : c.status.toLowerCase(),
         createdAt: c.createdAt.toISOString(),
       })),
       discussions: posts.map((p) => ({
@@ -368,7 +439,10 @@ export class AdminService {
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const { page: p, limit: l } = this.normalizePagination(
+      params.page,
+      params.limit,
+    );
     const includeTotal = params.includeTotal ?? true;
     const cacheKey = JSON.stringify({
       page: p,
@@ -387,7 +461,10 @@ export class AdminService {
 
     const where: Prisma.ReviewWhereInput = {};
     if (params.status) where.status = params.status;
-    const createdAtRange = this.buildCreatedAtRange(params.dateFrom, params.dateTo);
+    const createdAtRange = this.buildCreatedAtRange(
+      params.dateFrom,
+      params.dateTo,
+    );
     if (createdAtRange) where.createdAt = createdAtRange;
     if (params.q?.trim()) {
       const q = params.q.trim();
@@ -468,7 +545,9 @@ export class AdminService {
         deferred: ['comments', 'helpfulVotes', 'reactions'],
         id: review.id,
         title: review.title,
-        excerpt: review.content.slice(0, 120) + (review.content.length > 120 ? '...' : ''),
+        excerpt:
+          review.content.slice(0, 120) +
+          (review.content.length > 120 ? '...' : ''),
         body: review.content,
         author: review.author?.name ?? review.author?.username ?? 'Unknown',
         authorId: review.authorId,
@@ -497,7 +576,9 @@ export class AdminService {
         company: { select: { id: true, name: true, slug: true } },
         _count: { select: { comments: true } },
         reactions: { select: { type: true } },
-        helpfulVotes: { select: { userId: true, voteType: true, createdAt: true } },
+        helpfulVotes: {
+          select: { userId: true, voteType: true, createdAt: true },
+        },
         comments: {
           where: { parentId: null },
           orderBy: { createdAt: 'asc' },
@@ -563,7 +644,9 @@ export class AdminService {
     return {
       id: review.id,
       title: review.title,
-      excerpt: review.content.slice(0, 120) + (review.content.length > 120 ? '...' : ''),
+      excerpt:
+        review.content.slice(0, 120) +
+        (review.content.length > 120 ? '...' : ''),
       body: review.content,
       author: review.author?.name ?? review.author?.username ?? 'Unknown',
       authorId: review.authorId,
@@ -599,12 +682,18 @@ export class AdminService {
   }
 
   async getRatings(params: { page: number; limit: number }) {
-    const { page: p, limit: l } = this.normalizePagination(params.page, params.limit);
+    const { page: p, limit: l } = this.normalizePagination(
+      params.page,
+      params.limit,
+    );
     const cacheKey = `${p}:${l}`;
     const now = Date.now();
     const hit = ratingsListCache.get(cacheKey);
     if (hit && hit.expiry > now) {
-      return { ratings: [...hit.data.ratings], pagination: { ...hit.data.pagination } };
+      return {
+        ratings: [...hit.data.ratings],
+        pagination: { ...hit.data.pagination },
+      };
     }
 
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -629,9 +718,17 @@ export class AdminService {
     if (productIds.length === 0) {
       const result = {
         ratings: [],
-        pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
+        pagination: {
+          page: p,
+          limit: l,
+          total,
+          totalPages: Math.ceil(total / l),
+        },
       };
-      ratingsListCache.set(cacheKey, { data: result, expiry: now + RATINGS_LIST_CACHE_TTL_MS });
+      ratingsListCache.set(cacheKey, {
+        data: result,
+        expiry: now + RATINGS_LIST_CACHE_TTL_MS,
+      });
       return result;
     }
 
@@ -682,12 +779,17 @@ export class AdminService {
         submittedBy: prod.company?.name ?? '-',
         updatedAt: lastAt ? lastAt.toISOString().slice(0, 10) : '-',
         status: approvedCount > 0 ? 'published' : 'pending',
-        trend: (newThisWeek > 0 ? 'up' : 'stable') as 'up' | 'stable',
+        trend: newThisWeek > 0 ? 'up' : 'stable',
       };
     });
     const result = {
       ratings: list,
-      pagination: { page: p, limit: l, total, totalPages: Math.ceil(total / l) },
+      pagination: {
+        page: p,
+        limit: l,
+        total,
+        totalPages: Math.ceil(total / l),
+      },
     };
     ratingsListCache.set(cacheKey, {
       data: result,

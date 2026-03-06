@@ -9,7 +9,10 @@ export class UsersQueryDto extends PageLimitDto {
   q?: string;
 
   @IsOptional()
-  @IsDateString({}, { message: 'dateFrom must be a valid ISO 8601 date string' })
+  @IsDateString(
+    {},
+    { message: 'dateFrom must be a valid ISO 8601 date string' },
+  )
   dateFrom?: string;
 
   @IsOptional()

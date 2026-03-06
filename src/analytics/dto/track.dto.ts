@@ -2,7 +2,13 @@ export class TrackDto {
   path?: string;
   device?: string;
   timezone?: string;
-  event?: 'page_view' | 'page_leave' | 'signup_started' | 'signup_completed' | 'purchase' | 'like';
+  event?:
+    | 'page_view'
+    | 'page_leave'
+    | 'signup_started'
+    | 'signup_completed'
+    | 'purchase'
+    | 'like';
   sessionId?: string;
   enteredAt?: string;
   leftAt?: string;

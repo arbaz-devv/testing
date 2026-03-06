@@ -25,8 +25,7 @@ export class AdminGuard implements CanActivate {
           ? req.headers['x-admin-key'][0]
           : undefined;
     const query = (req as Request & { query?: { key?: string } }).query;
-    const queryKey =
-      typeof query?.key === 'string' ? query.key : undefined;
+    const queryKey = typeof query?.key === 'string' ? query.key : undefined;
     const provided = headerKey || queryKey;
     return provided === envKey ? envKey : null;
   }
@@ -54,6 +53,8 @@ export class AdminGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<Request>();
     if (this.getApiKey(req)) return true;
     if (this.getAdminFromToken(req)) return true;
-    throw new UnauthorizedException('Admin API key or valid admin token required');
+    throw new UnauthorizedException(
+      'Admin API key or valid admin token required',
+    );
   }
 }

@@ -12,7 +12,6 @@ import { AdminService } from './admin.service';
 import {
   AdminLazyQueryDto,
   PageLimitDto,
-  ReviewStatusQueryDto,
   UpdateReviewStatusDto,
   ReviewsQueryDto,
   UsersQueryDto,

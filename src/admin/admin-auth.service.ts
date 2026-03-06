@@ -14,7 +14,10 @@ export class AdminAuthService {
     return !!email?.trim() && !!hash?.trim();
   }
 
-  async login(email: string, password: string): Promise<{ token: string; expiresIn: number }> {
+  async login(
+    email: string,
+    password: string,
+  ): Promise<{ token: string; expiresIn: number }> {
     if (!this.isLoginEnabled()) {
       throw new UnauthorizedException('Admin login is not configured');
     }

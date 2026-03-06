@@ -27,7 +27,9 @@ function collectValidationIssues(
   const issues: ValidationIssue[] = [];
 
   for (const error of errors) {
-    const fieldPath = parentPath ? `${parentPath}.${error.property}` : error.property;
+    const fieldPath = parentPath
+      ? `${parentPath}.${error.property}`
+      : error.property;
     const messages = error.constraints ? Object.values(error.constraints) : [];
 
     for (const message of messages) {

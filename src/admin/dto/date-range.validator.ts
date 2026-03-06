@@ -17,24 +17,32 @@ export function IsDateRangeValid(
       options: validationOptions,
       validator: {
         validate(value: unknown, args: ValidationArguments) {
-          const [startPropertyName] = args.constraints;
+          const [startPropertyName] = args.constraints as [string];
+          if (!startPropertyName) return true;
           const startValue = (args.object as Record<string, unknown>)[
             startPropertyName
           ];
 
           if (!startValue || !value) return true;
 
-          const startDate = new Date(String(startValue));
-          const endDate = new Date(String(value));
+          if (typeof startValue !== 'string' || typeof value !== 'string') {
+            return true;
+          }
 
-          if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+          const startDate = new Date(startValue);
+          const endDate = new Date(value);
+
+          if (
+            Number.isNaN(startDate.getTime()) ||
+            Number.isNaN(endDate.getTime())
+          ) {
             return true;
           }
 
           return startDate.getTime() <= endDate.getTime();
         },
         defaultMessage(args: ValidationArguments) {
-          const [startPropertyName] = args.constraints;
+          const [startPropertyName] = args.constraints as [string];
           return `${args.property} must be greater than or equal to ${startPropertyName}`;
         },
       },

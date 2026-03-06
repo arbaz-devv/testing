@@ -8,29 +8,31 @@ import {
 } from 'class-validator';
 import { ReviewStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
+import type { TransformFnParams } from 'class-transformer';
 import { PageLimitDto } from './page-limit.dto';
 import { IsDateRangeValid } from './date-range.validator';
 
 export class ReviewsQueryDto extends PageLimitDto {
   @IsOptional()
-  @Transform(({ value }) => {
+  @Transform(({ value }: TransformFnParams): unknown => {
     if (typeof value === 'boolean') return value;
-    if (typeof value !== 'string') return value;
+    if (typeof value !== 'string') return value as unknown;
     const normalized = value.trim().toLowerCase();
     if (normalized === 'true' || normalized === '1') return true;
     if (normalized === 'false' || normalized === '0') return false;
-    return value;
+    return value as unknown;
   })
-  @IsBoolean({ message: 'includeTotal must be a boolean value (true or false)' })
+  @IsBoolean({
+    message: 'includeTotal must be a boolean value (true or false)',
+  })
   includeTotal?: boolean = true;
 
   @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.toUpperCase().trim() : value,
+  @Transform(({ value }: TransformFnParams): unknown =>
+    typeof value === 'string' ? value.toUpperCase().trim() : (value as unknown),
   )
   @IsEnum(ReviewStatus, {
-    message:
-      'status must be one of: PENDING, APPROVED, REJECTED, FLAGGED',
+    message: 'status must be one of: PENDING, APPROVED, REJECTED, FLAGGED',
   })
   status?: ReviewStatus;
 
@@ -40,7 +42,10 @@ export class ReviewsQueryDto extends PageLimitDto {
   q?: string;
 
   @IsOptional()
-  @IsDateString({}, { message: 'dateFrom must be a valid ISO 8601 date string' })
+  @IsDateString(
+    {},
+    { message: 'dateFrom must be a valid ISO 8601 date string' },
+  )
   dateFrom?: string;
 
   @IsOptional()
