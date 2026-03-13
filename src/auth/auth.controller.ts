@@ -6,6 +6,7 @@ import {
   Get,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -14,6 +15,7 @@ import {
 import type { Request, Response } from 'express';
 import type { CookieOptions } from 'express';
 import { Throttle } from '@nestjs/throttler';
+import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { AuthService } from './auth.service';
 import {
@@ -57,23 +59,45 @@ export class AuthController {
     return { user };
   }
 
+  @Get('check-username')
+  async checkUsername(
+    @Query('username') username: string | undefined,
+    @Req() req: Request,
+  ) {
+    const raw = (username ?? '').trim();
+    if (raw.length < 3 || raw.length > 30) {
+      throw new BadRequestException('Username must be 3–30 characters');
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(raw)) {
+      throw new BadRequestException(
+        'Username can only contain letters, numbers, and underscores',
+      );
+    }
+    const token = this.authService.getSessionTokenFromRequest(req);
+    const currentUser = await this.authService.getSessionFromToken(token);
+    const available = await this.authService.isUsernameAvailable(
+      raw,
+      currentUser?.id,
+    );
+    return { available };
+  }
+
   @Patch('me')
   @UseGuards(AuthGuard)
   async updateProfile(
     @Body() body: unknown,
     @Req() req: Request & { user: { id: string; username: string } },
   ) {
-    let parsed: { name?: string; username?: string; bio?: string };
+    let parsed: { username?: string; bio?: string };
     try {
       const raw =
         typeof body === 'object' && body !== null
           ? (body as Record<string, unknown>)
           : {};
       parsed = updateProfileSchema.parse({
-        name: raw.name,
         username: raw.username,
         bio: raw.bio,
-      }) as { name?: string; username?: string; bio?: string };
+      }) as { username?: string; bio?: string };
     } catch (err) {
       if (err instanceof ZodError) {
         const first = err.issues[0];
@@ -93,8 +117,7 @@ export class AuthController {
       }
     }
 
-    const data: { name?: string; username?: string; bio?: string } = {};
-    if (parsed.name !== undefined) data.name = parsed.name.trim();
+    const data: { username?: string; bio?: string } = {};
     if (parsed.username !== undefined) data.username = parsed.username.trim();
     if (parsed.bio !== undefined) data.bio = parsed.bio.trim();
 
@@ -104,8 +127,18 @@ export class AuthController {
       return { user };
     }
 
-    const user = await this.authService.updateProfile(req.user.id, data);
-    return { user };
+    try {
+      const user = await this.authService.updateProfile(req.user.id, data);
+      return { user };
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const target = (err.meta?.target as string[] | undefined)?.[0];
+        if (target === 'username') {
+          throw new ConflictException('Username is already taken');
+        }
+      }
+      throw err;
+    }
   }
 
   @Throttle({
@@ -121,7 +154,6 @@ export class AuthController {
       email: string;
       username: string;
       password: string;
-      name?: string;
     };
     try {
       const raw =
@@ -132,12 +164,10 @@ export class AuthController {
         email: raw.email ?? '',
         username: raw.username ?? '',
         password: raw.password ?? '',
-        name: raw.name,
       }) as {
         email: string;
         username: string;
         password: string;
-        name?: string;
       };
     } catch (err) {
       if (err instanceof ZodError) {
@@ -150,7 +180,6 @@ export class AuthController {
     const email = parsed.email.trim().toLowerCase();
     const username = parsed.username.trim();
     const password = parsed.password;
-    const name = parsed.name?.trim() || null;
 
     const existing = await this.authService.findUserByEmailOrUsername(
       email,
@@ -165,12 +194,25 @@ export class AuthController {
     }
 
     const passwordHash = await this.authService.hashPassword(password);
-    const user = await this.authService.createUser({
-      email,
-      username,
-      passwordHash,
-      ...(name ? { name } : {}),
-    });
+    let user;
+    try {
+      user = await this.authService.createUser({
+        email,
+        username,
+        passwordHash,
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const target = (err.meta?.target as string[] | undefined)?.[0];
+        if (target === 'email') {
+          throw new ConflictException('Email is already registered');
+        }
+        if (target === 'username') {
+          throw new ConflictException('Username is already taken');
+        }
+      }
+      throw err;
+    }
 
     const token = await this.authService.createSession(user.id);
     res.cookie('session', token, this.sessionCookieOptions());
@@ -237,7 +279,6 @@ export class AuthController {
         email: user.email,
         username: user.username,
         role: user.role,
-        name: user.name ?? null,
         avatar: user.avatar ?? null,
         verified: user.verified,
         reputation: user.reputation,

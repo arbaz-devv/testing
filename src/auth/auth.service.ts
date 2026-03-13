@@ -10,7 +10,6 @@ export interface SessionUser {
   email: string;
   username: string;
   role: string;
-  name: string | null;
   avatar: string | null;
   bio: string | null;
   verified: boolean;
@@ -32,6 +31,20 @@ export class AuthService {
     });
   }
 
+  /** Check if username is available (optionally excluding current user for edit-profile). */
+  async isUsernameAvailable(
+    username: string,
+    exceptUserId?: string,
+  ): Promise<boolean> {
+    const existing = await this.prisma.user.findFirst({
+      where: {
+        username: username.trim(),
+        ...(exceptUserId ? { id: { not: exceptUserId } } : {}),
+      },
+    });
+    return !existing;
+  }
+
   async findUserByEmail(email: string) {
     return this.prisma.user.findUnique({
       where: { email },
@@ -42,21 +55,18 @@ export class AuthService {
     email: string;
     username: string;
     passwordHash: string;
-    name?: string;
   }) {
     return this.prisma.user.create({
       data: {
         email: input.email,
         username: input.username,
         passwordHash: input.passwordHash,
-        name: input.name,
       },
       select: {
         id: true,
         email: true,
         username: true,
         role: true,
-        name: true,
         avatar: true,
         verified: true,
         reputation: true,
@@ -146,7 +156,6 @@ export class AuthService {
         email: session.user.email,
         username: session.user.username,
         role: session.user.role,
-        name: session.user.name ?? null,
         avatar: session.user.avatar ?? null,
         bio: session.user.bio ?? null,
         verified: session.user.verified,
@@ -176,14 +185,12 @@ export class AuthService {
 
   async updateProfile(
     userId: string,
-    data: { name?: string; username?: string; bio?: string },
+    data: { username?: string; bio?: string },
   ): Promise<SessionUser> {
     const updateData: {
-      name?: string | null;
       username?: string;
       bio?: string | null;
     } = {};
-    if (data.name !== undefined) updateData.name = data.name.trim() || null;
     if (data.username !== undefined) updateData.username = data.username.trim();
     if (data.bio !== undefined) updateData.bio = data.bio.trim() || null;
 
@@ -195,7 +202,6 @@ export class AuthService {
         email: true,
         username: true,
         role: true,
-        name: true,
         avatar: true,
         bio: true,
         verified: true,
@@ -207,7 +213,6 @@ export class AuthService {
       email: user.email,
       username: user.username,
       role: user.role,
-      name: user.name ?? null,
       avatar: user.avatar ?? null,
       bio: user.bio ?? null,
       verified: user.verified,
